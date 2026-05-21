@@ -2,11 +2,11 @@
 
 ## What this is
 
-A repackaging of the [Orchemist](https://github.com/ToscanAI/orchestration-engine) coding pipeline as a set of [Claude Code](https://claude.com/claude-code) skills (`.claude/skills/`) and subagents (`.claude/agents/`). Drop it into Claude Code and you get a one-command, ground-truth-anchored, adversarially-reviewed implementation pipeline for any GitHub issue: spec -> behavioral contracts -> adversary -> acceptance tests -> implement -> verify -> review -> fix -> test. Each phase writes exactly one file under `.orchemist/runs/<run-id>/`, so the whole run is auditable on disk.
+A repackaging of the [Orchemist](https://github.com/ToscanAI/orchemist) coding pipeline as a set of [Claude Code](https://claude.com/claude-code) skills (`.claude/skills/`) and subagents (`.claude/agents/`). Drop it into Claude Code and you get a one-command, ground-truth-anchored, adversarially-reviewed implementation pipeline for any GitHub issue: spec -> behavioral contracts -> adversary -> acceptance tests -> implement -> verify -> review -> fix -> test. Each phase writes exactly one file under `.orchemist/runs/<run-id>/`, so the whole run is auditable on disk.
 
 ## Why
 
-The Orchemist coding pipeline lives in a Python/FastAPI engine ([the main repo](https://github.com/ToscanAI/orchestration-engine)) that requires a server, a queue, and an OpenRouter / Anthropic API key. This skills pack is a stripped-down distribution: pure markdown, no Python runtime, no server. It runs entirely inside Claude Code using whatever model and auth you've already configured there (Anthropic subscription or API key — your choice). The adversary phase runs as a Claude Code subagent in its own context window, which is the first concrete step toward the engine's planned cross-model adversarial review (issue #677).
+The Orchemist coding pipeline lives in a Python/FastAPI engine ([the main repo](https://github.com/ToscanAI/orchemist)) that requires a server, a queue, and an OpenRouter / Anthropic API key. This skills pack is a stripped-down distribution: pure markdown, no Python runtime, no server. It runs entirely inside Claude Code using whatever model and auth you've already configured there (Anthropic subscription or API key — your choice). The adversary phase runs as a Claude Code subagent in its own context window, which is the first concrete step toward the engine's planned cross-model adversarial review (issue #677).
 
 ## Install
 
@@ -38,6 +38,6 @@ The orchestrator parses the issue file, creates a run directory at `<repo>/.orch
 - **Task tool fallback:** the `adversary` and `implement` skills delegate to subagents when the Task tool is available. If your Claude Code session lacks it, both skills have an explicit inline-mode fallback — you lose the fresh-context-window property, but the pipeline still produces the correct artifacts.
 - No telemetry, no auto-update, no automated CI for the skills themselves yet.
 
-If you want the full engine experience (web UI, queue, multi-provider model selection, daemon mode, history dashboards), see the main repo: <https://github.com/ToscanAI/orchestration-engine>.
+If you want the full engine experience (web UI, queue, multi-provider model selection, daemon mode, history dashboards), see the main repo: <https://github.com/ToscanAI/orchemist>.
 
 License: MIT. See `LICENSE`.
