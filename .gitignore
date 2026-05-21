@@ -1,0 +1,25 @@
+# Local run state — never check in
+.orchemist/runs/
+runs/
+
+# Node tooling (in case the package.json grows real dependencies)
+node_modules/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python (some skills shell out to pytest; people may experiment here)
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Editors / OS noise
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Installer backups it might create when run from inside this repo
+*.bak.*

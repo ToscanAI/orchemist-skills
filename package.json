@@ -1,0 +1,45 @@
+{
+  "name": "@toscan/orchemist-skills",
+  "version": "0.1.0",
+  "description": "Claude Code skills pack that repackages the Orchemist coding pipeline (spec, behavioral, adversary, acceptance tests, implement, review, fix, test) as pure markdown — no Python runtime.",
+  "keywords": [
+    "claude-code",
+    "claude",
+    "skills",
+    "orchemist",
+    "spec-driven-development",
+    "sdd",
+    "adversarial-review",
+    "atdd",
+    "agents"
+  ],
+  "homepage": "https://github.com/ToscanAI/orchemist-skills",
+  "bugs": {
+    "url": "https://github.com/ToscanAI/orchemist-skills/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ToscanAI/orchemist-skills.git"
+  },
+  "license": "MIT",
+  "author": "ToscanAI",
+  "files": [
+    "skills/",
+    "agents/",
+    "pipelines/",
+    "examples/",
+    "install.sh",
+    "LICENSE",
+    "README.md"
+  ],
+  "bin": {
+    "orchemist-skills-install": "./install.sh"
+  },
+  "scripts": {
+    "install-skills": "./install.sh"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true
+}

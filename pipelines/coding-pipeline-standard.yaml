@@ -1,0 +1,751 @@
+id: coding-pipeline-standard
+name: "Coding Pipeline Standard"
+description: "10-phase coding pipeline with 3-phase spec loop: spec → behavioral → adversary. Each agent writes ONE file, eliminating the bifurcation bug where secondary artifacts (spec-behavioral.md) were never written to disk. Adversarial spec review, engine-verified behavioral validation after EVERY code change."
+author: "Toscan"
+version: "2.0.0"
+category: "code"
+tags: [code, development, review, testing, pipeline]
+use_cases:
+  - "Feature implementation with automated code review"
+  - "Bug fixes with test verification"
+  - "Refactoring with regression testing"
+
+config_schema:
+  type: object
+  required: [issue_title, issue_body, repo_path, branch_name, issue_number, repo_url]
+  properties:
+    issue_title:
+      type: string
+      description: "GitHub issue title"
+    issue_body:
+      type: string
+      description: "Full issue description with requirements and acceptance criteria"
+    repo_path:
+      type: string
+      description: "Absolute path to the repository"
+    branch_name:
+      type: string
+      description: "Git branch name to create/use"
+    test_command:
+      type: string
+      default: "python3 -m pytest tests/ -x -q"
+      description: "Command to run tests"
+    files_context:
+      type: string
+      default: ""
+      description: "Key files and their purpose — helps the builder understand the codebase"
+    language:
+      type: string
+      default: "python"
+    style_guide:
+      type: string
+      default: "Follow existing code style. Add docstrings. Type hints where practical."
+    acceptance_test_file:
+      type: string
+      default: ""
+      description: "Optional: path to a pre-written acceptance test file. If empty, one is generated from the spec."
+    issue_number:
+      type: integer
+      description: "GitHub issue number — auto-injected into PR body as 'Closes #N'"
+    repo_url:
+      type: string
+      description: "GitHub repo URL (e.g. https://github.com/ToscanAI/orchestration-engine)"
+    acceptance_max_retries:
+      type: integer
+      default: 3
+      description: "Max implement→acceptance_run loop iterations (set max_iterations on implement and acceptance_run phases)"
+
+example_input:
+  issue_title: "Sample issue title"
+  issue_body: "Sample issue description and requirements."
+  repo_path: "/path/to/repo"
+  branch_name: "fix/issue-123"
+  issue_number: 123
+  repo_url: "https://github.com/ToscanAI/orchestration-engine"
+
+phases:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # SPEC LOOP: spec → behavioral → adversary (3-phase, each writes ONE file)
+  #
+  # Design rationale (v2.0):
+  # The v1.x 2-phase loop (spec → adversary) had a structural bug: the spec
+  # agent was asked to write TWO files (spec.md + spec-behavioral.md) but the
+  # OUTPUT_CAPTURE_INSTRUCTION told it not to write files. The daemon only
+  # persists the main phase output as {phase_id}.md — so spec-behavioral.md
+  # was never written to disk. The adversary read a stale/missing file every
+  # round, wasting iterations.
+  #
+  # The 3-phase loop fixes this: each agent writes exactly ONE artifact.
+  # The daemon persists it automatically. No bifurcation, no sync issues.
+  #
+  # Loop: spec → behavioral → adversary → [APPROVE] → acceptance_test
+  #                                      → [REQUEST_CHANGES] → spec (round 2)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # Phase 1a: Implementation Spec (Section B only)
+  - id: spec
+    name: "Implementation Spec"
+    description: "Interpret the issue into an implementation plan (Section B). Does NOT write behavioral contracts — that's the behavioral agent's job."
+    model_tier: sonnet
+    thinking_level: high
+    max_iterations: 3
+    transitions:
+      success: behavioral
+      failed: spec
+      timeout: spec
+      exhausted: postmortem_spec
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing the SPEC phase (1a/3) of the spec loop. Your output feeds the BEHAVIORAL phase — not the adversary directly. Write implementation guidance only. Do not write behavioral contracts. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      You are a senior developer interpreting a GitHub issue into an implementation plan.
+
+      ## GROUND TRUTH — The Issue You Are Implementing
+      **Title:** {config[issue_title]}
+      **Body:** {config[issue_body]}
+
+      Your implementation spec MUST be about this issue. Do NOT write a spec for any other system or feature.
+
+      ## Repository
+      **Path:** {config[repo_path]}
+      **Branch:** {config[branch_name]}
+      **Language:** {config[language]}
+
+      ## Codebase Context
+      {config[files_context]}
+
+      ## Previous Work
+      {phase_summary}
+
+      ## Prior Rounds
+      {iteration_history}
+
+      ## Iteration Context
+      If prior rounds exist above, this is a REVISION round. The adversary flagged issues with the behavioral contracts AND/OR the implementation plan. Read the adversary's findings and adjust your implementation guidance to support any tightened contracts.
+      If no prior rounds exist, this is round 1.
+
+      ## Task
+      Produce an implementation spec containing ONLY Section B (implementation guidance). Do NOT write behavioral contracts — a separate agent handles that.
+
+      ### Section B: Implementation Guidance
+      1. **Problem Statement** — What exactly needs to change and why
+      2. **Files to Modify** — List each file with what changes are needed
+      3. **Files to Create** — Any new files with their purpose
+      4. **Implementation Steps** — Ordered steps, specific enough to code from
+      5. **Risk Assessment** — What could break, backward compatibility concerns
+      6. **Observable Outcomes** — For each change, describe what a user/caller can observe (exit codes, stdout content, return values, error messages). The behavioral agent will use these to write tight contracts.
+
+      Be specific. Reference actual file paths and function names from the codebase context.
+
+      **CRITICAL INSTRUCTIONS FOR REVISION ROUNDS:**
+      1. Read the EXISTING file at {output_dir}/spec.md
+      2. Read the adversary's findings from the most recent round above
+      3. Fix ONLY the sections related to adversary findings — do not rewrite unflagged sections
+      4. Implementation steps the adversary did NOT flag MUST remain byte-identical
+      5. If findings relate to implementation details leaking into behavioral contracts, adjust your spec to clearly separate observable outcomes from internal implementation
+      6. If findings relate to missing edge cases, add implementation steps for those cases and describe their observable outcomes
+      7. If findings relate to divergence between spec and behavioral contracts, update your spec to match
+
+      Think of this as a code review fix: apply the minimum targeted edit. Do not refactor the whole file.
+      A full rewrite wastes tokens and loses adversary-approved content. Surgical edits only.
+
+      Write your implementation spec to {output_dir}/spec.md
+
+  # Phase 1b: Behavioral Contracts (Section A only)
+  - id: behavioral
+    name: "Behavioral Contracts"
+    description: "Write behavioral contracts (Section A) from the issue + implementation spec. Reads spec.md but outputs ONLY observable behavior — no implementation details."
+    model_tier: sonnet
+    thinking_level: high
+    max_iterations: 3
+    transitions:
+      success: spec_adversary
+      failed: behavioral
+      timeout: behavioral
+      exhausted: postmortem_spec
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing the BEHAVIORAL phase (1b/3) of the spec loop. Your output feeds the adversary. Write behavioral contracts only — describe WHAT the system does, not HOW. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      You are a behavioral contract specialist. Your job is to translate an implementation spec into precise, testable behavioral contracts.
+
+      ## GROUND TRUTH — The Feature You Are Writing Contracts For
+      **Title:** {config[issue_title]}
+      **Body:** {config[issue_body]}
+
+      Your behavioral contracts MUST describe the feature above. Do NOT write contracts for any other system, project, or feature. If the implementation spec describes a different feature than the issue above, write contracts based on the ISSUE — not the spec.
+
+      ## Implementation Spec
+      Read the implementation spec at: {output_dir}/spec.md
+      This describes HOW the feature will be built. Use it to understand the system,
+      but DO NOT copy implementation details into your behavioral contracts.
+
+      ## Previous Work
+      {phase_summary}
+
+      ## Prior Rounds
+      {iteration_history}
+
+      ## Iteration Context
+      If prior rounds exist above, this is a REVISION round. The adversary flagged specific weaknesses in the behavioral contracts. Fix ONLY the flagged issues. Do NOT rewrite contracts the adversary did not flag.
+      If no prior rounds exist, this is round 1.
+
+      ## Task
+      Write behavioral contracts describing WHAT the system should do. Use this format:
+      - "When [action/input], the system [expected behavior]"
+      - "Given [precondition], calling [operation] produces [outcome]"
+      - "If [edge case], the system [graceful behavior]"
+
+      ### Rules
+      - DO NOT name internal functions, private methods, or class names
+      - DO NOT specify data structures, variable names, or implementation patterns
+      - DO reference exact observable values: exit codes, stdout content, stderr messages, return formats
+      - ❌ Wrong: "The system calls `PipelineRunner.dry_run()`"
+      - ✅ Right: "When `--mode dry-run` is specified, no API calls are made and phase names are printed to stdout"
+      - ❌ Wrong: "Add `_extract_code_quality()` method"
+      - ✅ Right: "When code quality results are available, the composite score includes them"
+
+      ### Coverage checklist (mandatory)
+      For EACH feature path described in the implementation spec, ensure you have contracts covering:
+      1. **Happy path** — what happens when everything works (include observable output: stdout, return value, exit code)
+      2. **Error paths** — what happens on each failure mode (include exact error messages or required substrings)
+      3. **Edge cases** — boundary conditions, empty inputs, invalid values
+      4. **Interactions** — what happens when features combine (e.g., flags + modes)
+
+      A contract that only specifies an exit code without observable output is TRIVIALLY satisfiable. Always include what the user can SEE or RECEIVE.
+
+      ### CRITICAL INSTRUCTIONS FOR REVISION ROUNDS
+      1. Read the EXISTING file at {output_dir}/behavioral.md
+      2. Read the adversary's findings from the most recent round above
+      3. Fix ONLY the flagged contracts — do not rewrite unflagged ones
+      4. Contracts the adversary previously approved MUST remain byte-identical
+      5. If the adversary flagged a "missing edge case", add a new contract for it
+      6. If the adversary flagged "leakage", remove the internal reference and describe the observable outcome instead
+      7. If the adversary flagged "vague", make the contract concrete with specific observable values (exit codes, exact strings, regex patterns)
+      8. If the adversary flagged "divergence", align the contract with what the implementation spec describes
+
+      Think of this as a code review fix: apply the minimum targeted edit. Do not refactor the whole file.
+      A full rewrite wastes tokens and loses adversary-approved content. Surgical edits only.
+
+      Write your behavioral contracts to {output_dir}/behavioral.md
+
+  # Phase 1c: Adversarial Spec Review
+  - id: spec_adversary
+    name: "Spec Adversary Review"
+    description: "Adversarially review behavioral contracts AND implementation spec. Checks for vague contracts, trivial satisfaction, missing edge cases, implementation leakage, and divergence between spec and contracts."
+    model_tier: sonnet
+    thinking_level: high
+    max_iterations: 3
+    transitions:
+      approve: acceptance_test
+      request_changes: spec
+      exhausted: postmortem_spec
+      failed: spec_adversary
+      timeout: spec_adversary
+      success: spec  # fallback: if verdict extraction fails, loop back conservatively (issue #680)
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing the ADVERSARY phase (1c/3) of the spec loop. Your verdict determines whether behavioral contracts are strong enough to drive acceptance tests. On REQUEST_CHANGES, both the spec and behavioral agents will see your findings. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      You are an adversarial spec reviewer. Your job is to find weaknesses in behavioral contracts BEFORE acceptance tests are written against them.
+
+      ## GROUND TRUTH — The Issue These Contracts Must Cover
+      **Title:** {config[issue_title]}
+      **Body:** {config[issue_body]}
+
+      The behavioral contracts and implementation spec you are about to review MUST describe the feature in the issue above. Before applying your five checks, verify that `spec.md` and `behavioral.md` actually describe THIS issue. If either file describes a different system, project, or feature (e.g. a CLI tool when the issue is about a UI component), your verdict is `REQUEST_CHANGES` with a single finding:
+
+        [divergence] spec.md / behavioral.md describes <other topic> instead of the issue "<issue title>" — both files must be rewritten to address the actual issue
+
+      Do NOT invent findings about features that are not in the issue above. Every finding you raise must trace back to a specific contract or spec section that exists in the files you read.
+
+      ## Previous Work (for context only — do NOT re-raise findings already addressed)
+      {phase_summary}
+
+      ## Prior Rounds
+      {iteration_history}
+
+      ## Iteration Context
+      If prior rounds exist above, do NOT repeat findings that have been addressed. Only raise findings that are STILL present in the current files.
+
+      Read the behavioral contracts at: {output_dir}/behavioral.md
+      Read the implementation spec at: {output_dir}/spec.md
+
+      ## Changes Since Last Round
+      {phase_diff}
+
+      If the above section is non-empty, focus your review on what CHANGED. Do not re-raise findings on unchanged sections.
+
+      ## Your Checks (all mandatory)
+
+      1. **Specificity** — Are contracts concrete? "System should work" → REJECT. "When input is empty list, returns empty dict" → PASS
+      2. **Trivial satisfaction** — Could a no-op or stub function pass all contracts? If yes → REJECT. Every success-path contract MUST include observable output (stdout content, return value, side effect) beyond just an exit code.
+      3. **Edge case coverage** — Do contracts cover: error handling, boundary conditions, empty inputs, malformed data, feature interactions? Missing → REJECT
+      4. **Leakage** — Does behavioral.md name internal methods, class names, or implementation details from spec.md? If yes → REJECT. (You must read spec.md to detect what constitutes "internal details".)
+      5. **Alignment** — Do behavioral contracts match what spec.md describes? Are there implementation paths in spec.md with no corresponding behavioral contract? Divergence → REJECT
+
+      ## Output Format
+
+      Your response MUST start with one of these on the very first line:
+      - `APPROVE` — all contracts are tight enough to write meaningful acceptance tests
+      - `REQUEST_CHANGES` — one or more weaknesses found
+
+      For REQUEST_CHANGES, list findings using this format (one per line):
+        [category] description of the weakness
+
+      Where category is one of: vague, trivial, missing_edge_case, leakage, divergence
+
+      Example:
+        REQUEST_CHANGES
+        [vague] "The system handles errors gracefully" — no observable outcome specified
+        [trivial] CLI success contract only checks exit code 0 — a stub that exits 0 passes without executing anything
+        [missing_edge_case] No contract covers what happens when flags --foo and --bar conflict
+        [leakage] Behavioral contract references "_parse_verdict" which is an internal method in spec.md
+        [divergence] spec.md describes an MCP return format but behavioral.md has no contract for it
+
+      If APPROVE: write only APPROVE (optionally followed by brief rationale).
+      Write your full adversary review to {output_dir}/spec_adversary.md
+
+  # Phase 1d: Spec Postmortem (runs only on exhausted)
+  - id: postmortem_spec
+    name: "Spec Exhaustion Postmortem"
+    description: "When the spec loop exhausts iterations without agreement, extract unresolved findings and propose issue improvements for the next attempt."
+    model_tier: sonnet
+    thinking_level: medium
+    transitions: {}
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing the POSTMORTEM phase. The spec loop exhausted its iteration limit without the adversary approving. Extract unresolved findings and propose exact issue body improvements. [/PIPELINE CONTEXT]
+
+      You are a technical analyst performing a postmortem on a failed spec review cycle.
+
+      ## Pipeline Context
+      **Issue:** {config[issue_title]} (#{config[issue_number]})
+      **Repository:** {config[repo_path]}
+      **What happened:** The spec, behavioral, and adversary agents went through multiple rounds without agreement.
+
+      ## Current Files
+      Read the latest implementation spec at: {output_dir}/spec.md
+      Read the latest behavioral contracts at: {output_dir}/behavioral.md
+      Read the latest adversary review at: {output_dir}/spec_adversary.md
+
+      ## Round History
+      Read ALL round files from {output_dir}/ to understand the full evolution:
+      - spec_round1.md, behavioral_round1.md, spec_adversary_round1.md, etc.
+
+      ## Your Task
+
+      1. **Identify persistent findings** — Which adversary findings appeared in multiple rounds and were never resolved?
+      2. **Root cause analysis** — For each, explain WHY it persisted:
+         - Architectural contradiction in the issue body?
+         - Missing domain knowledge?
+         - Spec agent and behavioral agent talking past each other?
+         - Design decision the agents cannot make without human input?
+      3. **Proposed issue improvements** — For each persistent finding, write the EXACT text to add/change in the GitHub issue body.
+
+      Write your full postmortem to {output_dir}/postmortem_spec.md
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # IMPLEMENTATION PHASES (unchanged from v1.6)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # Phase 2: Behavioral Acceptance Tests
+  - id: acceptance_test
+    name: "Behavioral Acceptance Tests"
+    description: "Write behavioral tests from contracts ONLY — never from implementation. These become immutable constraints for the implementing agent. Behavioral contracts have been adversarially reviewed before reaching this phase."
+    model_tier: sonnet
+    thinking_level: high
+    transitions:
+      success: implement
+      failed: acceptance_test
+      timeout: acceptance_test
+    protected_outputs:
+      - acceptance_tests.py
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing the ACCEPTANCE_TEST phase. Write tests from behavioral contracts only. You have NO access to implementation details — this is by design. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      You are a QA engineer writing behavioral acceptance tests from a spec.
+      You have NOT seen any implementation — you are writing tests BEFORE the code exists.
+
+      ## GROUND TRUTH — The Issue These Tests Must Verify
+      **Title:** {config[issue_title]}
+      **Body:** {config[issue_body]}
+
+      The acceptance tests you write must verify the feature in the issue above. Before writing tests, read `behavioral.md` and verify it describes THIS issue. If `behavioral.md` describes a different system, project, or feature (e.g. a CLI tool when the issue is about a UI component), write a single failing test named `test_BLOCKED_behavioral_topic_mismatch` whose body calls `pytest.fail()` with the message `behavioral.md describes <other topic> instead of issue '<issue title>' — pipeline must restart with corrected behavioral contracts`. Do not write any other tests.
+
+      Do NOT invent tests for features that are not in the issue above. Every test must trace back to a specific contract in `behavioral.md`.
+
+      ## Previous Work
+      {phase_summary}
+
+      Read the behavioral contracts at: {output_dir}/behavioral.md
+      This file contains ONLY the behavioral contracts — what the system should do.
+      You have no access to implementation details. This is by design.
+
+      ## Task
+      1. Read the behavioral contracts carefully
+      2. Write a Python test file `{output_dir}/acceptance_tests.py` that:
+         - Contains pytest tests expressing behavioral contracts of the form:
+           "when I call X with Y, it produces Z"
+         - Tests are derived ONLY from behavioral.md — do not assume implementation details
+         - DO NOT test for specific method names, private functions, or class internals
+         - DO NOT test that a specific function exists — test that a BEHAVIOR works
+         - ❌ Wrong: "assert hasattr(obj, '_extract_code_quality')"
+         - ✅ Right: "assert scorer.compute(with_quality_data) > scorer.compute(without_quality_data)"
+         - Each test function has a clear docstring stating the behavioral contract
+         - Tests use `pytest` and standard Python imports only
+         - Tests are runnable: they import from the actual repo path `{config[repo_path]}`
+         - Add `sys.path.insert(0, '{config[repo_path]}')` or `sys.path.insert(0, str(Path('{config[repo_path]}').parent))` at the top
+         - Cover: happy path, edge cases, error cases, and boundary conditions
+         - Aim for 5-15 focused behavioral tests
+      3. Initialize acceptance results by writing `{output_dir}/acceptance_results.json`:
+         ```json
+         {{
+           "phase": "acceptance_test",
+           "status": "tests_written",
+           "test_file": "{output_dir}/acceptance_tests.py",
+           "passed": 0,
+           "failed": 0,
+           "errors": 0,
+           "total": 0,
+           "pass_rate": 0.0,
+           "note": "Tests written pre-implementation. Run after implement phase."
+         }}
+         ```
+
+      ## Output
+      Write a summary to {output_dir}/acceptance_test.md:
+      - List of behavioral contracts (one per test)
+      - Rationale for each contract (what aspect of the spec it validates)
+      - Any ambiguities in the spec that required assumptions
+
+  # Phase 3: Implementation
+  - id: implement
+    name: "Implementation"
+    description: "Write the code changes based on the spec, constrained by acceptance tests"
+    model_tier: sonnet
+    thinking_level: high
+    max_iterations: 3
+    transitions:
+      success: acceptance_run
+      failed: implement
+      timeout: implement
+      timeout: implement
+      exhausted: postmortem_review
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing the IMPLEMENT phase. Your output feeds the review phase — not a human. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      You are a developer implementing changes based on a spec.
+
+      ## IMMUTABLE CONSTRAINT — READ THIS FIRST
+      The acceptance test file at `{output_dir}/acceptance_tests.py` was written
+      BEFORE your implementation by a separate agent. It represents the behavioral
+      contract of this feature. You MUST make all tests in that file pass.
+      You MUST NOT modify, delete, or work around the acceptance tests.
+      The pass rate of those tests is the primary quality signal for this pipeline run.
+
+      ## GROUND TRUTH — The Issue You Are Implementing
+      **Title:** {config[issue_title]}
+      **Body:** {config[issue_body]}
+
+      The code you write must implement the feature in the issue above. Before writing any code, read `spec.md` and `acceptance_tests.py` and verify they describe THIS issue. If `spec.md` describes a different system, project, or feature (e.g. a CLI tool when the issue is about a UI component), STOP — write `BLOCKED: spec mismatch — spec.md describes <other topic> instead of issue '<issue title>'` to `{output_dir}/implement.md` and do NOT modify any files in the repository or create any commits.
+
+      Do NOT invent functionality that is not in the issue above. The issue body is the source of truth for what this feature does — if `spec.md` is missing detail, fall back to the issue body, never to your own assumptions.
+
+      ## Previous Work
+      {phase_summary}
+
+      Read the spec at: {output_dir}/spec.md
+      Read the acceptance tests at: {output_dir}/acceptance_tests.py
+
+      ## Repository
+      **Path:** {config[repo_path]}
+      **Branch:** {config[branch_name]}
+      **Style:** {config[style_guide]}
+
+      ## Task
+      1. Read the spec carefully
+      2. Read the acceptance tests — understand every behavioral contract they assert
+      3. Switch to the feature branch FIRST:
+         - Try `git checkout {config[branch_name]}` (if branch exists)
+         - If it doesn't exist: `git checkout -b {config[branch_name]}`
+         - IMPORTANT: Do NOT write any code on main. Verify you are on the correct branch before making changes.
+      4. Implement ALL changes described in the spec such that acceptance tests pass
+      5. Write clean, documented code following the style guide
+      6. If `{output_dir}/acceptance_results.json` exists and shows prior failures
+         (from the acceptance_run phase — `"phase": "acceptance_run"`), read the
+         `failure_details` field carefully and fix the code to make those tests pass.
+      7. Commit with message referencing the issue: `feat/fix(#issue): description`
+      8. Run the full test suite to verify: `{config[test_command]}`
+      9. Push your branch to remote: `git push --set-upstream origin {config[branch_name]}`
+
+      ## Output
+      Write a summary of changes to {output_dir}/implement.md including:
+      - Files changed with brief description of each change
+      - Any deviations from the spec and why
+      - Full test suite results (pass/fail count)
+      - Commit hash
+
+  # Phase 3b: Engine-executed Acceptance Test Runner
+  - id: acceptance_run
+    name: "Acceptance Test Runner"
+    description: "Engine executes pytest directly on acceptance_tests.py — no agent. Writes engine-verified results to acceptance_results.json."
+    task_type: acceptance_run
+    max_iterations: 3
+    working_dir: "{config[repo_path]}"
+    transitions:
+      success: review
+      failed: implement
+      exhausted: postmortem_review
+
+  # Phase 4: Code Review (Opus)
+  - id: review
+    name: "Opus Code Review"
+    description: "Senior code review by Opus — quality gate with APPROVE/REQUEST_CHANGES verdict"
+    model_tier: opus
+    thinking_level: high
+    max_iterations: 3
+    supervisor: true
+    supervisor_model: opus
+    supervisor_rubric: |
+      Evaluate the code review quality:
+      - Did it identify real issues vs nitpicks?
+      - Are security concerns addressed?
+      - Is backward compatibility verified?
+      - Are the suggested fixes actionable?
+    transitions:
+      approve: test
+      request_changes: fix
+      abort: fix
+      success: test
+      failed: review
+      timeout: review
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing the REVIEW phase. Your verdict determines whether the code proceeds to testing or goes back for fixes. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      You are a senior code reviewer (Opus-tier). Your job is to catch bugs, security issues, and design problems.
+
+      ## GROUND TRUTH — The Issue This Code Must Implement
+      **Title:** {config[issue_title]}
+      **Body:** {config[issue_body]}
+
+      The code you are reviewing must implement the feature in the issue above. Before reviewing for correctness, security, edge cases, or backward compatibility, run `git diff main...{config[branch_name]}` and verify the diff actually implements THIS issue. If the diff implements a different system, project, or feature than the issue above, your verdict on line 1 is `ABORT` followed by the single finding:
+
+        [BLOCKER][correctness] diff implements <other topic> instead of issue "<issue title>" — implementation must be redone from a corrected spec
+
+      Do NOT invent issues about features that are not in the issue above. Every finding you raise must trace back to a specific changed line or file in the diff.
+
+      ## Previous Work
+      {phase_summary}
+
+      ## Prior Rounds
+      {iteration_history}
+
+      ## Iteration Context
+      If prior rounds exist above, focus on: (1) verifying that prior fixes were applied, (2) finding NEW issues not raised before. Do NOT re-raise issues that were already fixed.
+
+      Read the implementation summary at: {output_dir}/implement.md
+      Read the spec at: {output_dir}/spec.md
+
+      ## Repository
+      **Path:** {config[repo_path]}
+      **Branch:** {config[branch_name]}
+
+      ## Task
+      1. Checkout the feature branch: `git checkout {config[branch_name]}`
+      2. Run `git diff main...{config[branch_name]}` to see all changes
+      3. Review EVERY changed file for:
+         - **Correctness** — Does it do what the spec says?
+         - **Security** — Injection, path traversal, unsafe operations?
+         - **Edge cases** — Missing error handling, boundary conditions?
+         - **Backward compatibility** — Does it break existing behavior?
+         - **Test coverage** — Are the changes adequately tested?
+
+      ## Output
+      Write your review to {output_dir}/review.md.
+
+      **IMPORTANT:** Your response MUST start with one of these verdicts on the very first line:
+      - `APPROVE` — code is ready to merge (no blockers, at most minor issues)
+      - `REQUEST_CHANGES` — one or more blockers or major issues found
+      - `ABORT` — fatal issue discovered, pipeline cannot continue safely
+
+      **DO NOT** write any preamble, commentary, or "thinking out loud" text before the verdict.
+      The very first line of review.md must be the verdict word and nothing else.
+
+      ## Structured Output Format
+      Your review.md MUST follow this exact structure:
+
+      Line 1: APPROVE  -or-  REQUEST_CHANGES  -or-  ABORT  (nothing else on this line)
+
+      Then for each issue found, one line per issue using this tag format:
+        [SEVERITY][category] description of the issue
+
+      Where SEVERITY is one of: BLOCKER, MAJOR, MINOR, NITPICK
+      And category is a short label such as: security, correctness, style,
+        performance, test, compatibility, design
+
+      ✅ CORRECT example:
+      Correct example:
+        REQUEST_CHANGES
+        [BLOCKER][security] SQL query in db.py:42 uses string concatenation — use parameterized queries
+        [MAJOR][correctness] parse_output() returns None instead of empty list when input is empty
+        [MINOR][style] Missing docstring on helper function _build_query()
+        [NITPICK][style] Trailing whitespace on line 18 of utils.py
+
+      ❌ WRONG — never start with preamble before the verdict:
+      WRONG — never start with preamble before the verdict:
+        Now let me run the tests first to check the implementation...
+        REQUEST_CHANGES
+        [BLOCKER][security] ...
+
+      If there are no issues (APPROVE with clean code), write only:
+        APPROVE
+
+      Do NOT use any other tag format. Do NOT add extra headers or sections
+      between the verdict line and the issue lines.
+
+  # Phase 4b: Fix Review Feedback
+  - id: fix
+    name: "Apply Review Fixes"
+    description: "Address code review feedback, then re-verify behavioral contracts before re-review"
+    model_tier: sonnet
+    thinking_level: low
+    max_iterations: 3
+    transitions:
+      success: acceptance_run
+      failed: fix
+      timeout: fix
+      exhausted: postmortem_review
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing the FIX phase of an automated coding pipeline. Your output feeds a re-review — not a human. Do not ask questions, request clarification, or send messages to external channels. Deliver your complete output as structured text following the format below. [/PIPELINE CONTEXT]
+
+      You are a developer addressing code review feedback.
+
+      ## GROUND TRUTH — The Issue This Fix Must Support
+      **Title:** {config[issue_title]}
+      **Body:** {config[issue_body]}
+
+      The fixes you apply must support the feature in the issue above. Before applying any fix from `review.md`, verify the review finding is about THIS issue's feature. If `review.md` requests changes for a different system, project, or feature than the issue above, write `BLOCKED: review topic mismatch — review.md describes <other topic> instead of issue '<issue title>'` to `{output_dir}/fix.md` and do NOT modify any files in the repository or create any commits.
+
+      Do NOT apply speculative fixes for features not in the issue above. Every code change must address a specific finding in `review.md` that relates to this issue.
+
+      ## Previous Work
+      {phase_summary}
+
+      ## Prior Rounds
+      {iteration_history}
+
+      ## Iteration Context
+      If prior rounds exist above, do NOT re-apply fixes already committed. Focus only on NEW issues from the latest review.
+
+      Read the code review at: {output_dir}/review.md
+      Read the original spec at: {output_dir}/spec.md
+
+      ## Repository
+      **Path:** {config[repo_path]}
+      **Branch:** {config[branch_name]}
+
+      ## Task
+      1. Checkout the feature branch: `git checkout {config[branch_name]}`
+      2. Read the code review carefully
+      3. If the review says APPROVE with no blockers — write "No fixes needed" to {output_dir}/fix.md and stop
+      4. If REQUEST_CHANGES — apply ALL fixes mentioned:
+         - Address every blocker and major issue
+         - Address minor issues where practical
+         - IMPORTANT: Only modify code directly related to the reviewer's feedback. Minimal diff.
+      5. Run tests: `{config[test_command]}`
+      6. Commit fixes on this branch: `fix: address code review feedback`
+      7. Push your branch to remote: `git push origin {config[branch_name]}`
+
+      ## Output
+      Write to {output_dir}/fix.md:
+      - Each issue addressed and how
+      - Any issues intentionally deferred and why
+      - Updated test results
+      - Commit hash
+
+  # Phase 5b: Review Postmortem (runs only on exhausted — review/fix could not converge)
+  - id: postmortem_review
+    name: "Review Loop Exhaustion Postmortem"
+    description: "When the review/fix loop exhausts iterations without approval, extract persistent review findings and diagnose why fixes failed to satisfy the reviewer."
+    model_tier: sonnet
+    thinking_level: medium
+    transitions: {}
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing the POSTMORTEM phase of an automated coding pipeline. The review and fix phases exhausted their iteration limit without the reviewer approving the implementation. Your job is to extract the reviewer's unresolved findings and diagnose why the fix agent could not satisfy them. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      You are a technical analyst performing a postmortem on a failed review/fix cycle.
+
+      ## Pipeline Context
+      **Issue:** {config[issue_title]} (#{config[issue_number]})
+      **Repository:** {config[repo_path]}
+      **Branch:** {config[branch_name]}
+      **What happened:** The reviewer and fix agent went through multiple rounds without the reviewer approving the implementation.
+
+      ## Current Files
+      Read the latest review at: {output_dir}/review.md
+      Read the latest fix notes at: {output_dir}/fix.md
+      Read the implementation spec at: {output_dir}/spec.md
+      Read the behavioral contracts at: {output_dir}/behavioral.md
+
+      ## Round History
+      Read ALL round files from {output_dir}/ to understand the full evolution:
+      - review_round1.md, fix_round1.md, review_round2.md, fix_round2.md, etc.
+      - These files contain the complete review/fix exchange across all rounds
+
+      ## Your Task
+
+      1. **Identify persistent findings** — Which review findings appeared in multiple rounds and were never resolved?
+      2. **Root cause analysis** — For each persistent finding, explain WHY the fix agent failed to resolve it. Common causes:
+         - The fix is cosmetic but the reviewer wants a structural change
+         - The fix introduces a new issue while solving the flagged one
+         - The fix agent lacks context about architectural constraints
+         - The review finding is subjective or contradicts the spec
+         - The acceptance tests pass but the reviewer wants changes beyond the spec
+      3. **Assessment** — For each persistent finding, classify it:
+         - **Spec gap:** The behavioral contracts don't cover this — needs a spec update
+         - **Implementation gap:** The code doesn't satisfy an existing contract — needs a better fix
+         - **Scope creep:** The reviewer is asking for changes beyond the issue scope — document and defer
+         - **Contradiction:** The reviewer's request conflicts with the spec or acceptance tests — escalate
+
+      Write your full postmortem to {output_dir}/postmortem_review.md
+
+      The pipeline ends here. The findings should inform the next pipeline run or a manual intervention.
+
+  # Phase 5: Test Verification (Command Phase)
+  - id: test
+    name: "Test Verification"
+    description: "Run full test suite to verify no regressions"
+    task_type: command
+    command: "{config[test_command]}"
+    working_dir: "{config[repo_path]}"
+    allowed_commands: ["python3", "python", "pytest"]
+
+# Auto-merge configuration
+auto_merge:
+  enabled: true
+  min_score: 0.90
+  require_approve: true
+  strategy: squash
+
+# Confidence-based routing
+routing_config:
+  tiers:
+    - name: auto_merge
+      min_score: 0.90
+      max_score: 1.01
+      requires: ["tests_pass"]
+      notify: ["log"]
+    - name: human_review
+      min_score: 0.75
+      max_score: 0.90
+      requires: []
+      notify: ["log"]
+    - name: auto_retry
+      min_score: 0.50
+      max_score: 0.75
+      requires: []
+      notify: ["log"]
+      strategy: escalate_model
+      max_retries: 1
+    - name: reject
+      min_score: 0.0
+      max_score: 0.50
+      requires: []
+      notify: ["log"]
