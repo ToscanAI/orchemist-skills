@@ -30,12 +30,13 @@ The orchestrator parses the issue file, creates a run directory at `<repo>/.orch
 
 ## Status
 
-**Alpha.** This is a fresh repackage. The underlying pipeline prompts have one successful end-to-end run via the Python engine (recorded 2026-04-17 on a fix branch for the engine repo), but this skills pack is new and has not been used in production. Expect rough edges:
+**Alpha.** This is a fresh repackage. The underlying pipeline prompts have one successful end-to-end run via the Python engine (recorded 2026-04-17 on a fix branch for the engine repo), plus one E2E test of this skills pack itself (2026-05-21, parseDuration bug fix on a TypeScript test repo — reached `acceptance_run` with 12/12 acceptance tests passing post-fix). Expect rough edges:
 
 - The orchestrator state machine is described in the `/orchemist:run` skill body but is executed by Claude reading and writing files — it is not a compiled state machine. Multi-phase runs depend on the model following the orchestrator skill's instructions accurately.
 - Verdict extraction follows the engine's `verdict_parser.extract_verdict` contract, but the implementation is in a skill's prose, not a parser library — corner cases may differ.
-- The acceptance-run and test phases shell out to `python3 -m pytest`. Non-Python projects will need to override `test_command` in the issue file.
-- No telemetry, no auto-update, no e2e tests for the skills themselves yet.
+- **Multi-language support landed 2026-05-21** (after the first E2E test). `acceptance_test` and `acceptance_run` now switch on `config.language` between Python/pytest, TypeScript+JavaScript/jest, and Go/`go test`. Unknown languages fall back to Python.
+- **Task tool fallback:** the `adversary` and `implement` skills delegate to subagents when the Task tool is available. If your Claude Code session lacks it, both skills have an explicit inline-mode fallback — you lose the fresh-context-window property, but the pipeline still produces the correct artifacts.
+- No telemetry, no auto-update, no automated CI for the skills themselves yet.
 
 If you want the full engine experience (web UI, queue, multi-provider model selection, daemon mode, history dashboards), see the main repo: <https://github.com/ToscanAI/orchestration-engine>.
 

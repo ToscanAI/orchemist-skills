@@ -36,7 +36,7 @@ If `repo_path` is missing or not a git repo, STOP and tell the user to either ru
 
 Default pipeline: `~/.claude/skills/orchemist/pipelines/coding-pipeline-standard.yaml` (if missing, fall back to the repo-local `pipelines/coding-pipeline-standard.yaml`).
 
-If the user passes `--skip-spec`, use `coding-pipeline-skip-spec.yaml` instead — in which case `spec.md` and `behavioral.md` MUST already exist in the run directory before phase 1.
+If the user passes `--skip-spec`, use `~/.claude/skills/orchemist/pipelines/coding-pipeline-skip-spec.yaml` (or repo-local `pipelines/coding-pipeline-skip-spec.yaml`) instead. **Pre-condition:** the user must pre-place `spec.md` and `behavioral.md` in `<repo_path>/.orchemist/runs/<run-id>/` BEFORE invoking the orchestrator. To resume an existing run with pre-written files, also pass `--resume <run-id>` so the orchestrator does not generate a new run-id and overwrite the pre-placed files.
 
 ## Run state directory
 
@@ -116,6 +116,10 @@ Map verdicts to YAML transition keys:
 - `failed` → `failed`
 - iteration cap exceeded → `exhausted`
 
+## Substitution syntax — two notations, one dict
+
+The pipeline YAML's `prompt_template` strings use Python `.format()` syntax: `{config[issue_title]}`. The skill bodies (this file + each phase skill) use Jinja-style: `{{config.issue_title}}`. **Both refer to the same `state.config` dict** — just two notations for the same value. The Python engine uses the first; humans and Claude read the second. When you render a prompt as the orchestrator, treat them as synonyms.
+
 ## Phase summary and iteration history substitution
 
 When you render a phase's `prompt_template`, replace these tokens by reading prior phase output files in `<output_dir>/`:
@@ -132,30 +136,42 @@ When you render a phase's `prompt_template`, replace these tokens by reading pri
 - `{{output_dir}}` → absolute path to `<output_dir>`
 - `{{phase_summary}}` → concatenation of "## Previous phase: <id>\n<file contents>" for each completed phase (excluding the current one). Keep total under ~6000 chars by trimming each file to its first 1500 chars if needed.
 - `{{iteration_history}}` → if this phase has prior rounds (`state.phase_iterations[phase.id] > 1`), embed previous round outputs from `<output_dir>/<phase.id>_round<N>.md`. Otherwise empty string.
-- `{{phase_diff}}` (used by `spec_adversary`) → diff between current `<output_dir>/spec.md` and `<output_dir>/spec_round<N-1>.md` (if it exists), formatted as a unified diff. Empty for round 1.
+- `{{phase_diff}}` (used by `spec_adversary`) → produced by `diff -u <output_dir>/spec_round<N-1>.md <output_dir>/spec.md` (or `git diff --no-index <old> <new>` if you prefer). Empty string when `spec_round<N-1>.md` does not exist (i.e. round 1).
 
 For each round, BEFORE invoking the phase skill, copy the existing `<output_dir>/<phase_id>.md` (if any) to `<output_dir>/<phase_id>_round<N>.md` so prior rounds are preserved.
 
 ## Acceptance run phase (no agent)
 
-The `acceptance_run` phase has no LLM. Instead:
+The `acceptance_run` phase has no LLM. Instead, pick the runner from `config.language`:
 
-1. Read `<output_dir>/acceptance_tests.py`
-2. Run `cd <config.repo_path> && python3 -m pytest <output_dir>/acceptance_tests.py -v --tb=short`
-3. Parse stdout for pass/fail counts
+| language       | test file                                  | command                                                                 |
+|----------------|--------------------------------------------|-------------------------------------------------------------------------|
+| `python`       | `<output_dir>/acceptance_tests.py`         | `cd <config.repo_path> && python3 -m pytest <test_file> -v --tb=short`  |
+| `typescript`   | `<output_dir>/acceptance_tests.test.ts`    | `cd <config.repo_path> && npx jest <test_file> --verbose` (or `vitest run <test_file>`) |
+| `javascript`   | `<output_dir>/acceptance_tests.test.js`    | `cd <config.repo_path> && npx jest <test_file> --verbose`               |
+| `go`           | `<output_dir>/acceptance_tests_test.go`    | `cd <config.repo_path> && go test ./... -run AcceptanceTests -v`        |
+| (other / blank)| default to python                          | as above                                                                |
+
+Steps:
+
+1. Read the test file matching `config.language` from `<output_dir>/`.
+2. Run the matching command. Capture stdout and exit code.
+3. Parse stdout for pass/fail counts (each runner reports differently — pytest summary line, jest summary block, go test PASS/FAIL/--- markers).
 4. Write `<output_dir>/acceptance_results.json`:
    ```json
    {
      "phase": "acceptance_run",
+     "language": "<config.language>",
+     "command": "<the exact command run>",
      "passed": <int>,
      "failed": <int>,
      "errors": <int>,
      "total": <int>,
-     "pass_rate": <float 0..1>,
-     "failure_details": "<pytest -v output for failing tests>"
+     "pass_rate": <float — informational only>,
+     "failure_details": "<verbatim output for failing tests>"
    }
    ```
-5. Verdict = `success` iff `pass_rate == 1.0`, else `failed`.
+5. Verdict = `success` iff `passed == total` AND `failed == 0` AND `errors == 0`. (Use integer equality, not `pass_rate == 1.0` float compare.)
 
 ## Command phase
 

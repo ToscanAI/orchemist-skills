@@ -7,6 +7,10 @@ description: Phase 3 of the Orchemist coding pipeline. Implements the feature, c
 
 This skill should be delegated to the `orchemist-implementer` subagent via the Task tool, so the implementer runs with its own focused tool list and context budget.
 
+### If the Task tool is not available
+
+Some Claude Code sessions are launched without the Task tool. If you cannot delegate, run the implement phase **inline** using the same prompt body below and the same output contract — the orchestrator's verdict contract is unchanged. You lose the fresh-context-window property of subagent delegation, but the phase still produces the correct artifact. Add a line `note: ran inline; Task tool unavailable` near the top of the resulting `implement.md` so the post-run summary records it.
+
 When delegating, pass the following prompt verbatim:
 
 ---
