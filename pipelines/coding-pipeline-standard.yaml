@@ -87,11 +87,10 @@ phases:
   # of existing symbol) at THREE late checkpoints — SPEC_ADVERSARY R1 ([divergence]
   # finding requiring a re-spec round), IMPLEMENT (BLOCKED report routed via
   # seal-break or a retroactive refactor), REVIEW ([MAJOR][correctness]
-  # requiring a refactor commit on top). Two production examples shipped
-  # in 2026-05 (E11-03 #119: three UI-primitive duplications caught at
-  # Phase-8 retroactive review — 1hr refactor cost; E11-04 #120: VALID_SECTIONS
-  # hardcode caught at SPEC_ADVERSARY R1 — re-spec round cost) demonstrated
-  # the catch is consistently LATE — after authoring has begun.
+  # requiring a refactor commit on top). Production audit pattern: two
+  # consecutive feature PRs each shipped a 7d-duplication-then-fix cycle —
+  # one via post-impl refactor (~1hr cost), one via re-spec round. The catch
+  # was consistently LATE — after authoring had begun.
   #
   # Phase 0 fixes this by producing a sticky `{output_dir}/existing_symbols.md`
   # inventory BEFORE Phase 1a SPEC. Every subsequent phase (spec, behavioral,
@@ -122,12 +121,13 @@ phases:
     name: "Existing-symbols inventory (sub-check 7d pre-flight)"
     description: "Greps the project for existing UI primitives, shared libraries, adjacent action/hook patterns, and workspace-barrel exports. Writes a sticky `existing_symbols.md` artifact read by every subsequent phase. Resolves the late-catch problem for sub-check 7d (re-implementation of existing symbol)."
     model_tier: sonnet
-    thinking_level: low
-    max_iterations: 1
+    thinking_level: medium
+    max_iterations: 2
     transitions:
       success: spec
       failed: existing_symbols_inventory
       timeout: existing_symbols_inventory
+      exhausted: spec  # graceful degradation — if inventory fails twice, fall through to SPEC with an empty inventory (downstream phases revert to ad-hoc grep per the backward-compat short-circuit clause in REVIEW)
     prompt_template: |
       [PIPELINE CONTEXT] You are executing the EXISTING_SYMBOLS_INVENTORY phase (Phase 0). Your output feeds every subsequent phase. Do not ask questions or send messages. [/PIPELINE CONTEXT]
 
@@ -609,15 +609,48 @@ phases:
       - **`defer_contract` helper** (REQUIRED — see canonical body below): for contracts genuinely unverifiable at script-run time (live network, runtime-only DB state, fixture machinery not yet wired). NEVER use `ok "...DEFERRED..."` — that inflates the pass counter (sub-check 5b anti-pattern).
       - Final summary regex: `^✓ PASS — [0-9]+ passed / [0-9]+ failed / [0-9]+ deferred` on success; `^✗ FAIL — ...` on failure. Exit 0 iff failed == 0.
 
-      Canonical `defer_contract` body (brace-escaped for the Python-format prompt renderer; the agent MUST un-escape `{{`/`}}` to single-brace characters when writing to the file — the doubling is a Python-format escape required by this prompt template):
+      Canonical helper bodies (brace-escaped for the Python-format prompt renderer; the agent MUST un-escape `{{`/`}}` to single-brace characters when writing to the file — the doubling is a Python-format escape required by this prompt template):
 
       ```bash
+      # `ok` / `bad` / `note` helpers — visible per-check output with counter increment.
+      ok()   {{ printf '  \033[32m✓\033[0m %s\n' "$*"; passes=$((passes + 1)); }}
+      bad()  {{ printf '  \033[31m✗\033[0m %s\n' "$*"; fails=$((fails + 1)); }}
+      note() {{ printf '  \033[33m•\033[0m %s\n' "$*"; notes=$((notes + 1)); }}
+
+      # `defer_contract` — explicit deferral; NOT counted as ok, NOT counted as fail.
       defer_contract() {{
           local contract_id="$1"
           local reason="$2"
           printf '  \033[33m⊘\033[0m %s — DEFERRED: %s\n' "$contract_id" "$reason"
           deferred=$((deferred + 1))
           deferred_list+=("$contract_id")
+      }}
+
+      # `count_matches_fixed` — grep -cF (fixed-string), pipefail-safe. <file> is RELATIVE to $ROOT (helper prepends).
+      count_matches_fixed() {{
+          local pattern="$1"
+          local file="$2"
+          if [ ! -f "$ROOT/$file" ]; then echo 0; return 0; fi
+          local n
+          n=$( (grep -cF -- "$pattern" "$ROOT/$file" 2>/dev/null) || true)
+          echo "${{n:-0}}"
+      }}
+
+      # `count_matches_re` — grep -cE (extended regex), pipefail-safe. <file> is RELATIVE to $ROOT.
+      count_matches_re() {{
+          local pattern="$1"
+          local file="$2"
+          if [ ! -f "$ROOT/$file" ]; then echo 0; return 0; fi
+          local n
+          n=$( (grep -cE -- "$pattern" "$ROOT/$file" 2>/dev/null) || true)
+          echo "${{n:-0}}"
+      }}
+
+      # `file_sha256` — pipefail-safe sha256 of a file, or 'missing' if absent.
+      file_sha256() {{
+          local file="$1"
+          if [ ! -f "$file" ]; then echo 'missing'; return 0; fi
+          sha256sum "$file" | awk '{{print $1}}'
       }}
       ```
 
@@ -1015,9 +1048,11 @@ phases:
          **Sticky enforcement (v4 — Phase-0 existing-symbols inventory):** read `{output_dir}/existing_symbols.md` and cross-check EVERY new file/symbol in the diff against inventory sections 1-4. For each new symbol, verify ONE of:
          - (a) **Consume verified** — the diff imports the canonical existing symbol from its inventory path (e.g. `import {{ Dialog }} from '@<scope>/ui/dialog'` — un-escape `{{`/`}}` to single-brace characters when writing the file; the doubling is a Python-format escape required by this prompt template).
          - (b) **Divergence justified** — spec.md has a `## Divergence justification` subsection naming the existing symbol + the contract-required difference; the diff implements the divergence as documented.
-         - (c) **Authored as new** — the new symbol IS recorded in inventory §6 ("SPEC's proposed new symbols") with rationale; the diff authors it at the proposed path.
+         - (c) **Authored as new** — the new symbol IS recorded in inventory §6 ("SPEC's proposed new symbols") with rationale; the diff authors it at the proposed path. Arm-(c) requires the §6 entry to be specific: `<symbol-name>` ← `<proposed-path:line>` ← (rationale: why no existing inventory entry suffices). A §6 entry that merely says "new symbol" without the path AND the rationale is NOT a valid arm-(c) — flag as `[MAJOR][test_coverage]` against inventory hygiene.
 
          Any new symbol in the diff that overlaps with inventory §1-4 WITHOUT one of (a)/(b)/(c) is `[MAJOR][correctness]` — recommend refactor to consume the existing primitive (R2 fix-pass).
+
+         **Backward-compat short-circuit:** if `{output_dir}/existing_symbols.md` sections 1-4 are ALL empty-stubs ("(empty — consumer did not provide inventory inputs)"), the 3-arm test does NOT short-circuit to "no findings". Instead fall back to ad-hoc grep against the standard targets (project UI primitive package(s), `lib/`/`utils/`, sibling files in target directory, workspace barrels) and apply the same 3-arm logic. The Phase-0 inventory is the PRIMARY signal but not the ONLY signal — v3-fallback consumers still get the late-catch via this ad-hoc grep.
 
          Search targets when the inventory is absent OR incomplete (fallback to ad-hoc grep):
          - Project UI primitive package(s) (Dialog, Badge, Alert, Popover, Toast, Skeleton, Tooltip, Tabs, Card, Input, Button, Label, etc.)
@@ -1122,6 +1157,7 @@ phases:
 
       Read the code review at: {output_dir}/review.md
       Read the original spec at: {output_dir}/spec.md
+      Read the existing-symbols inventory at: {output_dir}/existing_symbols.md (Phase-0 sticky reference; sub-check 7d applies to FIX too — any fix that introduces a NEW symbol overlapping inventory §1-4 is the same 7d violation IMPLEMENT would have raised BLOCKED on. Read §1-4 + §6 BEFORE authoring any new symbol while addressing review findings; if a fix requires duplication, return BLOCKED to {output_dir}/fix.md instead of authoring the duplicate.)
 
       ## Repository
       **Path:** {config[repo_path]}
