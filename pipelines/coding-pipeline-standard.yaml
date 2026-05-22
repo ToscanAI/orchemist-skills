@@ -845,7 +845,7 @@ phases:
 
       5. Seal-break audit-trail verification (when applicable):
 
-         If the branch contains any `SEAL BROKEN` commit, verify the canonical 4-step seal-break protocol (4 protocol steps; 3 of which are commits — step 2 captures the narrow re-review APPROVE in the SEAL BROKEN commit's body, not as a separate commit):
+         If the branch contains any `SEAL BROKEN` commit, verify the canonical 4-step seal-break protocol (all 4 steps are commits; the narrow re-review APPROVE verdict is captured as an audit-trail reference inside step 2's SEAL BROKEN commit body — NOT as a separate fifth commit):
 
            1. `chore(#N): seal verify-<issue>.sh` (or equivalent SEAL commit) — records pre-amendment sha256
            2. `test(#N): amend §<section> — SEAL BROKEN <reason>` — explicit SEAL BROKEN marker in body; the narrow re-review APPROVE verdict is captured in this commit's body as audit-trail reference (not a separate commit)
