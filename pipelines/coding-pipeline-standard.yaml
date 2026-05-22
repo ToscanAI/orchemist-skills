@@ -286,13 +286,13 @@ phases:
       These sub-checks generalize lessons accumulated across production pipeline runs. Each catches a class of contract weakness that the five canonical checks alone do not surface.
 
       ### 1a — Cross-layer identifier mapping
-      Every identifier-shaped string that crosses a layer (HTTP wire ↔ application ↔ database; user-facing ↔ internal) MUST be pinned to its exact external-API field shape. Examples: UUID format (8-4-4-4-12 hex with hyphens), CIK left-padded to 10 digits, ticker symbol canonicalization rules, ISO-8601 timestamp precision (`\d{3}Z` not `.\d+Z` — the unescaped dot matches any character). If the behavioral contract says "session ID is a UUID" without pinning the exact shape, flag `[vague]` with the contract id.
+      Every identifier-shaped string that crosses a layer (HTTP wire ↔ application ↔ database; user-facing ↔ internal) MUST be pinned to its exact external-API field shape. Examples: UUID format (8-4-4-4-12 hex with hyphens); fixed-width identifiers padded to a documented length; canonicalization rules for case/whitespace; ISO-8601 timestamp precision (e.g. `\d{{3}}Z` rather than `.\d+Z` — the unescaped dot matches any character). If the behavioral contract says "session ID is a UUID" without pinning the exact shape, flag `[vague]` with the contract id.
 
       ### 1b — Stable diagnostic codes
       When a contract anchors on tool output (compiler errors, linter messages, test failures, HTTP error responses), the anchor MUST be on the STABLE error code (e.g. `TS2353`, `no-unused-vars`, SQLSTATE, HTTP status) — NOT on human-facing message prose. Message text drifts across tool versions; codes are part of the tool's public API. Flag `[vague]` if a contract anchors only on prose.
 
       ### 1c — Dev-mode instrumentation noise filter
-      When asserting HTTP response body content for status-code markers, use canonical error-page phrases (`HTTP 500`, `Internal Server Error`, `Application error: a server-side exception`) — NOT bare digit substrings. Modern frameworks emit debug payloads with performance-timing numbers, hashes, and line numbers; a bare `500` false-positives on `performance.now()` timestamps and React 19 RSC Flight chunks. Flag `[vague]` when a contract matches a 3-digit HTTP code without anchoring context.
+      When asserting HTTP response body content for status-code markers, use canonical error-page phrases (`HTTP 500`, `Internal Server Error`, `Application error: a server-side exception`) — NOT bare digit substrings. Modern frameworks emit debug payloads with performance-timing numbers, hashes, and line numbers; a bare `500` false-positives on `performance.now()` timestamps and framework-emitted debug stream chunks. Flag `[vague]` when a contract matches a 3-digit HTTP code without anchoring context.
 
       ### 5a — Closed-union set-equality
       Any closed union the spec declares (error taxonomies, status enums, kind discriminators) MUST be covered set-equally in behavioral.md: every union member appears in at least one Given/When/Then contract. Count members in spec vs members covered in behavioral; flag `[missing_edge_case]` for any uncovered member. This generalizes the discriminated-union exhaustiveness check beyond TypeScript to any language.
@@ -424,7 +424,7 @@ phases:
 
       ### TypeScript / JavaScript — write `{output_dir}/acceptance_tests.js` (or `.ts`)
       - Contains jest tests (`describe`/`it`/`expect`)
-      - Add `import { ... } from '{config[repo_path]}/...'` resolving to the production code paths
+      - Add `import {{ ... }} from '{config[repo_path]}/...'` resolving to the production code paths (when writing the file, un-escape `{{`/`}}` to single `{{`-character / single `}}`-character — the brace-doubling is a Python-format escape required by this prompt template)
       - Aim for 5-15 focused behavioral tests
 
       ### Go — write `{output_dir}/acceptance_tests_test.go`
@@ -434,7 +434,7 @@ phases:
 
       ### Bash (verify-script — project deviation, used when behavioral contracts span shell-orchestrated workflows: real-DB integration, CLI dev-server harnesses, multi-package build gates)
 
-      Write `{config[repo_path]}/scripts/verify-<issue>.sh` where `<issue>` is a slug derived from `{config[issue_number]}` (or `{config[issue_title]}` if your project prefers a kebab-case slug). Common shapes: plain integer (`verify-123.sh`), JIRA-style (`verify-PROJ-123.sh`), or epic-tagged (`verify-E11-03.sh`). The script:
+      Write `{config[repo_path]}/scripts/verify-<issue>.sh` where `<issue>` is a slug derived from `{config[issue_number]}` (or `{config[issue_title]}` if your project prefers a kebab-case slug). Common shapes: plain integer (`verify-123.sh`), JIRA-style (`verify-PROJ-123.sh`), or epic-tagged (`verify-EPIC-NN-MM.sh`). The script:
 
       - Uses `set -uo pipefail` (NOT `set -e` — see sub-check 2a in the TEST_ADVERSARY prompt for why)
       - Uses the `if VAR=$(cmd); then ...; else ...; fi` form (NOT `var=$(cmd); if [ "$?" -eq 0 ]; ...` which crashes silently under `set -e`)
@@ -448,7 +448,7 @@ phases:
       - **`defer_contract` helper** (REQUIRED — see canonical body below): for contracts genuinely unverifiable at script-run time (live network, runtime-only DB state, fixture machinery not yet wired). NEVER use `ok "...DEFERRED..."` — that inflates the pass counter (sub-check 5b anti-pattern).
       - Final summary regex: `^✓ PASS — [0-9]+ passed / [0-9]+ failed / [0-9]+ deferred` on success; `^✗ FAIL — ...` on failure. Exit 0 iff failed == 0.
 
-      Canonical `defer_contract` body (brace-escaped for the Python-format prompt renderer; the agent must un-escape `{{`/`}}` to `{`/`}` when writing to the file):
+      Canonical `defer_contract` body (brace-escaped for the Python-format prompt renderer; the agent MUST un-escape `{{`/`}}` to single-brace characters when writing to the file — the doubling is a Python-format escape required by this prompt template):
 
       ```bash
       defer_contract() {{
@@ -462,7 +462,7 @@ phases:
 
       Companion init at the top of the script: `deferred=0` and `deferred_list=()` alongside `passes=0` `fails=0`.
 
-      Canonical seal banner (§1 — printed at runtime, NOT hardcoded-checked — the sha256 is recorded in the Phase-2c SEAL commit body; un-escape `{{...}}` to `{...}` when writing the file):
+      Canonical seal banner (§1 — printed at runtime, NOT hardcoded-checked — the sha256 is recorded in the Phase-2c SEAL commit body; un-escape `{{...}}` to single-brace `...` when writing the file):
 
       ```bash
       SELF_SHA=$(sha256sum "$ROOT/scripts/verify-<issue>.sh" | awk '{{print $1}}')
@@ -615,7 +615,7 @@ phases:
 
         [category] description with concrete pointer (file:line or §-header)
 
-      where category ∈ {vague, trivial, missing_edge_case, leakage, divergence}.
+      where category is one of: vague, trivial, missing_edge_case, leakage, divergence.
 
       If APPROVE: write `APPROVE` followed by 1-2 sentences confirming the test artifact is structurally sound.
 
@@ -642,7 +642,7 @@ phases:
       You are a developer implementing changes based on a spec.
 
       ## IMMUTABLE CONSTRAINT — READ THIS FIRST
-      The acceptance test artefact (path resolves per `{config[language]}` — see below) was written BEFORE your implementation by a separate agent AND adversarially reviewed in Phase 2c TEST_ADVERSARY. It represents the behavioral contract of this feature.
+      The acceptance test artefact (path resolves per `{config[language]}` per the table in the "Read the acceptance tests" line of the Task section below) was written BEFORE your implementation by a separate agent AND adversarially reviewed in Phase 2c TEST_ADVERSARY. It represents the behavioral contract of this feature.
 
       You MUST make the acceptance assertions pass. You MUST NOT modify, delete, or work around the acceptance artefact under any path you take through this phase. For bash verify-scripts, the artefact's sha256 is recorded in the Phase-2c SEAL commit body and MUST remain byte-stable for the duration of IMPLEMENT — any apparent defect is a candidate for SEAL BROKEN via the canonical narrow-re-review audit-locked cycle (orchestrator-driven, NOT IMPL-driven). The pass rate of the acceptance assertions is the primary quality signal for this pipeline run.
 
@@ -693,7 +693,7 @@ phases:
 
       1. **Test-only database migration** — a migration whose only consumer is a verify-script query (a column rename so a §N grep matches; an alias view; a CHECK-constraint relaxation that the production model never needs). Verify-query mismatches are test bugs, not migrations.
       2. **Test-only env-var knob** — `process.env.X` reads (or equivalents in other languages) whose only effect is to alter test-environment behavior (idle timeouts, retry counts, log-format toggles, shutdown grace). Production code should not grow knobs production never sets.
-      3. **Test-only NODE_ENV (or equivalent) branching** — `if (process.env.NODE_ENV === "test") { ... }` branches in production modules that return different shapes for tests. Production code should be uniform; tests should observe production behavior, not a different code path.
+      3. **Test-only NODE_ENV (or equivalent) branching** — `if (process.env.NODE_ENV === "test") {{ ... }}` branches in production modules that return different shapes for tests (un-escape `{{`/`}}` to single brace characters when writing the file; the doubling is a Python-format escape required by this prompt template). Production code should be uniform; tests should observe production behavior, not a different code path.
 
       If your only path to green is one of these patterns, return BLOCKED with the disallowed pattern name. The orchestrator (or REVIEWER) intervenes if the production behavior is correct and the script's assertion is wrong.
 
@@ -845,7 +845,7 @@ phases:
 
       5. Seal-break audit-trail verification (when applicable):
 
-         If the branch contains any `SEAL BROKEN` commit, verify the canonical 4-commit chain (per PIPELINE.md Seal break protocol):
+         If the branch contains any `SEAL BROKEN` commit, verify the canonical 4-step seal-break protocol (4 protocol steps; 3 of which are commits — step 2 captures the narrow re-review APPROVE in the SEAL BROKEN commit's body, not as a separate commit):
 
            1. `chore(#N): seal verify-<issue>.sh` (or equivalent SEAL commit) — records pre-amendment sha256
            2. `test(#N): amend §<section> — SEAL BROKEN <reason>` — explicit SEAL BROKEN marker in body; the narrow re-review APPROVE verdict is captured in this commit's body as audit-trail reference (not a separate commit)
