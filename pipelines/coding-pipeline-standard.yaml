@@ -28,8 +28,8 @@ config_schema:
       description: "Git branch name to create/use"
     test_command:
       type: string
-      default: "python3 -m pytest tests/ -x -q"
-      description: "Command to run tests"
+      default: ""
+      description: "Command to run tests. REQUIRED if config.language is not python (the engine default falls back to 'python3 -m pytest tests/ -x -q' only for python). Examples: 'npm test -- --watch=false', 'pnpm vitest run', 'go test ./...', 'bash scripts/verify-<issue>.sh'."
     files_context:
       type: string
       default: ""
@@ -301,7 +301,13 @@ phases:
       If the spec or behavioral leaks language like "we'll skip this in tests" or "this contract will be deferred" without naming the canonical `defer_contract` helper (or the language equivalent), flag `[trivial]`. A contract that is genuinely unverifiable at acceptance-time MUST be marked explicitly deferred via a dedicated counter — never silently counted as passing.
 
       ### 7d — Re-implementation of an existing symbol (spec-level smell)
-      If the spec proposes authoring a new helper, loader, formatter, type, component, hook, or utility that duplicates an existing symbol in the codebase, flag `[divergence]`. The IMPLEMENT phase has its own 7d HARD RULE that returns BLOCKED on duplication; catching the proposal at SPEC stage saves a full pipeline round. Search includes: project UI primitive package(s), `lib/`/`utils/`, sibling `*-data.ts`, `_loaders/`, `_shared/`. Genuine divergence (different sort order, different precision, different sealed string) is not duplication — but the spec must call it out explicitly.
+      If the spec proposes authoring a new helper, loader, formatter, type, component, hook, or utility that duplicates an existing symbol in the codebase, flag `[divergence]`. The IMPLEMENT phase has its own 7d HARD RULE that returns BLOCKED on duplication; catching the proposal at SPEC stage saves a full pipeline round.
+
+      Search targets (adapt per project — these are the canonical scan paths): the project's UI primitive package(s); `lib/`, `utils/`, `_shared/` directories; sibling files in the same directory (across language extensions — `.ts`, `.js`, `.py`, `.go` — pick the relevant ones); cross-package symbols accessible via workspace boundaries.
+
+      Note: if the SPEC_ADVERSARY phase does NOT have repo grep access (some daemons restrict adversary tooling), raise this as `[divergence]` to push the search responsibility to IMPLEMENT (which has 7d as a HARD RULE and MUST grep before authoring). The flag itself ensures the IMPLEMENT agent treats the proposed new symbol with extra scrutiny.
+
+      Genuine divergence (different sort order, different precision, different sealed string) is NOT duplication — but the spec must call it out explicitly with a `## Divergence justification` subsection naming the existing symbol and the contract-required difference.
 
       ## Output Format
 
@@ -378,10 +384,13 @@ phases:
       failed: acceptance_test
       timeout: acceptance_test
     protected_outputs:
-      - acceptance_tests.py
-      - acceptance_tests.js
-      - acceptance_tests_test.go
-      - "scripts/verify-*.sh"
+      # Paths relative to {output_dir} unless prefixed with the repo path placeholder.
+      - acceptance_tests.py            # Python (pytest)
+      - acceptance_tests.js            # TypeScript/JavaScript (jest, transpiled or vanilla JS)
+      - acceptance_tests.ts            # TypeScript (jest with ts-jest, or vitest)
+      - acceptance_tests_test.go       # Go (go test)
+      # Bash verify-scripts live in the repo, NOT the run output dir.
+      - "{config[repo_path]}/scripts/verify-*.sh"
     prompt_template: |
       [PIPELINE CONTEXT] You are executing the ACCEPTANCE_TEST phase. Write tests from behavioral contracts only. You have NO access to implementation details — this is by design. Do not ask questions or send messages. [/PIPELINE CONTEXT]
 
@@ -425,11 +434,12 @@ phases:
 
       ### Bash (verify-script — project deviation, used when behavioral contracts span shell-orchestrated workflows: real-DB integration, CLI dev-server harnesses, multi-package build gates)
 
-      Write `{config[repo_path]}/scripts/verify-<issue>.sh` where `<issue>` is the issue identifier (e.g. `E11-03` or `119`). The script:
+      Write `{config[repo_path]}/scripts/verify-<issue>.sh` where `<issue>` is a slug derived from `{config[issue_number]}` (or `{config[issue_title]}` if your project prefers a kebab-case slug). Common shapes: plain integer (`verify-123.sh`), JIRA-style (`verify-PROJ-123.sh`), or epic-tagged (`verify-E11-03.sh`). The script:
 
       - Uses `set -uo pipefail` (NOT `set -e` — see sub-check 2a in the TEST_ADVERSARY prompt for why)
       - Uses the `if VAR=$(cmd); then ...; else ...; fi` form (NOT `var=$(cmd); if [ "$?" -eq 0 ]; ...` which crashes silently under `set -e`)
-      - Single-quoted grep patterns; `grep -c ... || true` to avoid pipefail exit-1 on zero match
+      - **Single-quoted grep patterns** to disable shell expansion of regex metacharacters (`grep '^foo\\.bar$' file`, NOT `grep "^foo\\.bar$" file`)
+      - **Pipefail-safe count**: `grep -c <pattern> <file> || true` to neutralize pipefail's exit-1 on zero match (otherwise the script aborts at the first probe that matches zero lines, which is often a legitimate "no errors" state)
       - Probe directories under `{config[repo_path]}/.verify-<issue>-probe/` (NOT bare `/tmp` — `tsc moduleResolution: "bundler"` needs hoisted node_modules)
       - EXIT-trap cleanup that reaps process groups (`kill -- -$PGID`) + removes probe directories + leaves ports free
       - Per-probe tsconfigs with `"files": ["<probe>"]` (NOT `--project tsconfig.json <file>` — the latter emits TS5042 instead of TS2322/TS2353)
@@ -438,24 +448,24 @@ phases:
       - **`defer_contract` helper** (REQUIRED — see canonical body below): for contracts genuinely unverifiable at script-run time (live network, runtime-only DB state, fixture machinery not yet wired). NEVER use `ok "...DEFERRED..."` — that inflates the pass counter (sub-check 5b anti-pattern).
       - Final summary regex: `^✓ PASS — [0-9]+ passed / [0-9]+ failed / [0-9]+ deferred` on success; `^✗ FAIL — ...` on failure. Exit 0 iff failed == 0.
 
-      Canonical `defer_contract` body:
+      Canonical `defer_contract` body (brace-escaped for the Python-format prompt renderer; the agent must un-escape `{{`/`}}` to `{`/`}` when writing to the file):
 
       ```bash
-      defer_contract() {
+      defer_contract() {{
           local contract_id="$1"
           local reason="$2"
           printf '  \033[33m⊘\033[0m %s — DEFERRED: %s\n' "$contract_id" "$reason"
           deferred=$((deferred + 1))
           deferred_list+=("$contract_id")
-      }
+      }}
       ```
 
       Companion init at the top of the script: `deferred=0` and `deferred_list=()` alongside `passes=0` `fails=0`.
 
-      Canonical seal banner (§1 — printed at runtime, NOT hardcoded-checked — the sha256 is recorded in the Phase-2c SEAL commit body):
+      Canonical seal banner (§1 — printed at runtime, NOT hardcoded-checked — the sha256 is recorded in the Phase-2c SEAL commit body; un-escape `{{...}}` to `{...}` when writing the file):
 
       ```bash
-      SELF_SHA=$(sha256sum "$ROOT/scripts/verify-<issue>.sh" | awk '{print $1}')
+      SELF_SHA=$(sha256sum "$ROOT/scripts/verify-<issue>.sh" | awk '{{print $1}}')
       printf '  sha256: %s = %s\n' "scripts/verify-<issue>.sh" "$SELF_SHA"
       ```
 
@@ -472,12 +482,23 @@ phases:
       - Cover: happy path, edge cases, error cases, boundary conditions
       - Public contract surface (HTTP routes, action signatures, exact rendered strings, closed-union members) IS the contract and IS testable; private helper names are leakage
 
-      3. Initialize acceptance results by writing `{output_dir}/acceptance_results.json`:
+      ## Revision-round (when TEST_ADVERSARY returns REQUEST_CHANGES)
+
+      If a prior acceptance test artefact exists at the language-appropriate path AND the `{iteration_history}` shows a prior TEST_ADVERSARY round with REQUEST_CHANGES findings, you are in REVISION ROUND. Apply SURGICAL edits to the existing file — do not rewrite from scratch. Tests the adversary did NOT flag MUST remain byte-identical. Address ONLY the flagged findings:
+
+      1. Read the existing acceptance test artefact at the language-appropriate path.
+      2. Read the adversary's findings from `{output_dir}/test_adversary.md` (the most recent round overwrites prior rounds; only the current findings remain).
+      3. Apply targeted fixes per finding category: `[vague]` → tighten anchor (e.g. anchor on diagnostic code, not message prose); `[trivial]` → strengthen assertion (e.g. `=== 5` not `<= 5`); `[missing_edge_case]` → add a new test/probe for the gap; `[leakage]` → remove the internal-helper reference and replace with observable; `[divergence]` → align with behavioral.md.
+      4. A full rewrite wastes tokens AND loses adversary-approved content. Surgical edits only.
+
+      ## Initialize acceptance results
+
+      Write `{output_dir}/acceptance_results.json`:
          ```json
          {{
            "phase": "acceptance_test",
            "status": "tests_written",
-           "test_file": "{output_dir}/acceptance_tests.py",
+           "test_file": "<language-appropriate path: acceptance_tests.py | acceptance_tests.js | acceptance_tests.ts | acceptance_tests_test.go | scripts/verify-{config[issue_number]}.sh>",
            "passed": 0,
            "failed": 0,
            "errors": 0,
@@ -500,8 +521,8 @@ phases:
   # the test is sealed and the implementation phase begins. The orchemist
   # canonical pipeline trusts pytest as structurally sound; this is correct
   # for Python projects. Bash verify scripts have more surface for structural
-  # mistakes (heredoc parse errors, quote-aware bugs, GraphQL schema drift,
-  # path-math defects, broken grep anchors) — hence this added loop.
+  # mistakes (heredoc parse errors, quote-aware bugs, third-party schema
+  # drift, path-math defects, broken grep anchors) — hence this added loop.
   #
   # Static review here does NOT catch RUNTIME bugs in the test — those
   # surface in Phase 3 (IMPLEMENT) as BLOCKED reports routed back via
@@ -547,7 +568,7 @@ phases:
       ## Read
       Read the acceptance test file at: `{output_dir}/acceptance_tests.py` (Python) OR `{output_dir}/acceptance_tests.js` (TS/JS) OR `{output_dir}/acceptance_tests_test.go` (Go) OR `{config[repo_path]}/scripts/verify-<issue>.sh` (bash) — switch on {config[language]}.
 
-      For bash verify scripts, also note the script's SHA256 (`sha256sum scripts/verify-<issue>.sh`) — the SEAL commit records this; you are reviewing the PRE-SEAL state.
+      For bash verify scripts, also note the script's SHA256 (`sha256sum scripts/verify-<issue>.sh`) for transparency only — the canonical SEAL sha256 is generated AFTER your APPROVE by the orchestrator's Phase-2c SEAL commit; you are reviewing the PRE-SEAL state and your computed sha will not equal the sealed sha. Do NOT pin or record this transient sha as if it were the seal value.
 
       ## Your Six Mandatory Checks (canonical 5 + project deviation #6)
 
@@ -555,7 +576,7 @@ phases:
 
          **1b — Stable diagnostic codes (project sub-check):** when an acceptance probe regex-matches tool output (tsc, eslint, pytest, jq), anchor on the STABLE error code (`TS2353`, `no-unused-vars`, `test-id`, SQLSTATE) rather than human-facing message prose. Message text drifts across tool versions; codes are part of the tool's public API. Flag as `[vague]` if the only match is against prose.
 
-         **1c — Dev-mode instrumentation noise filter (project sub-check):** when asserting HTTP response body content for status-code markers, use canonical error-page phrases (`HTTP 500`, `Internal Server Error`, `Application error: a server-side exception`) NOT bare digit substrings. Dev-mode frameworks emit debug payloads with performance-timing numbers, hashes, and line numbers; a bare `500` false-positives on `performance.now()` timestamps and RSC Flight debug chunks. Flag as `[vague]` when a grep matches a 3-digit HTTP code without anchoring context.
+         **1c — Dev-mode instrumentation noise filter (project sub-check):** when asserting HTTP response body content for status-code markers, use canonical error-page phrases (`HTTP 500`, `Internal Server Error`, `Application error: a server-side exception`) NOT bare digit substrings. Dev-mode frameworks emit debug payloads with performance-timing numbers, hashes, and line numbers; a bare `500` false-positives on `performance.now()` timestamps and other framework-emitted debug streams. Flag as `[vague]` when a grep matches a 3-digit HTTP code without anchoring context.
 
          **1d — TS `as` cast bypass in reject probes (project sub-check):** in TypeScript reject probes (code that demonstrates rejection of an invalid literal — TS2322 / TS2339 / TS2353 / etc.), the load-bearing literal MUST NOT be wrapped in an `as` type assertion. `as` collapses the literal to the asserted type at the cast site, so an incompatible value silently widens and the probe passes without proving anything. Canonical fix: typed `const` LHS with direct literal assignment, OR `satisfies` for narrowing without assertion. Flag as `[trivial]` with the file:line of the `as` cast.
 
@@ -577,7 +598,7 @@ phases:
 
          **5b — Deferred-as-ok inflation (project sub-check, acceptance-test specific):** scan for any `ok ".*DEFERRED.*"`, `ok ".*PENDING.*"`, or `ok ".*SKIPPED.*"` lines (or the language equivalent — pytest `@pytest.mark.xfail(strict=False)`, jest `it.skip`). The `ok` helper increments the pass counter, so a contract that was NOT exercised at script-run time gets counted as exercised. Canonical fix: a `defer_contract` helper with a separate `deferred` counter and a summary section listing every deferred contract id. Flag `[trivial]` with the file:line.
 
-      6. **Cross-section state simulation (project sub-check, bash/multi-step specific)** — walk the sections in order, tracking per-test-entity cumulative state: rate-limit slots consumed, DB rows created/deleted/updated, session cookies captured/invalidated, seeded entity states. For each §N probe, verify its preconditions are SATISFIED by the accumulated state from §§1...N-1. Flag `[missing_edge_case]` when a §N asserts "user X emits event Y" while §M (M<N) exhausted X's quota — structurally impossible, but individual sections each look fine in isolation.
+      6. **Cross-section state simulation (project sub-check, multi-step specific)** — walk the test steps in order (numbered §-sections in a bash verify-script; `beforeEach` chains + ordered `it` blocks in jest; pytest fixtures with session scope; Go subtest ordering), tracking per-test-entity cumulative state: rate-limit slots consumed, DB rows created/deleted/updated, session cookies captured/invalidated, seeded entity states. For each step's probe, verify its preconditions are SATISFIED by the accumulated state from prior steps. Flag `[missing_edge_case]` when a §N (or `it` block N) asserts "user X emits event Y" while §M (M<N) exhausted X's quota — structurally impossible, but individual steps each look fine in isolation. The bash framing applies most directly to verify-scripts; equivalent state-tracking applies in any multi-step test framework.
 
       ## Prior-cycle lessons the test MUST respect
 
@@ -621,11 +642,9 @@ phases:
       You are a developer implementing changes based on a spec.
 
       ## IMMUTABLE CONSTRAINT — READ THIS FIRST
-      The acceptance test file at `{output_dir}/acceptance_tests.py` was written
-      BEFORE your implementation by a separate agent. It represents the behavioral
-      contract of this feature. You MUST make all tests in that file pass.
-      You MUST NOT modify, delete, or work around the acceptance tests.
-      The pass rate of those tests is the primary quality signal for this pipeline run.
+      The acceptance test artefact (path resolves per `{config[language]}` — see below) was written BEFORE your implementation by a separate agent AND adversarially reviewed in Phase 2c TEST_ADVERSARY. It represents the behavioral contract of this feature.
+
+      You MUST make the acceptance assertions pass. You MUST NOT modify, delete, or work around the acceptance artefact under any path you take through this phase. For bash verify-scripts, the artefact's sha256 is recorded in the Phase-2c SEAL commit body and MUST remain byte-stable for the duration of IMPLEMENT — any apparent defect is a candidate for SEAL BROKEN via the canonical narrow-re-review audit-locked cycle (orchestrator-driven, NOT IMPL-driven). The pass rate of the acceptance assertions is the primary quality signal for this pipeline run.
 
       ## GROUND TRUTH — The Issue You Are Implementing
       **Title:** {config[issue_title]}
@@ -636,6 +655,10 @@ phases:
       Do NOT invent functionality that is not in the issue above. The issue body is the source of truth for what this feature does — if `spec.md` is missing detail, fall back to the issue body, never to your own assumptions.
 
       ## HARD RULES (return BLOCKED rather than violate any of these)
+
+      **BLOCKED contract (applies to every rule below):** when you raise BLOCKED for ANY of these rules, write the report to `{output_dir}/implement.md` with FIRST LINE = `BLOCKED: <category> — <one-line summary>`, then add 1-3 paragraphs explaining the violation, the disallowed path you considered, and the recommended audit-locked recovery. STOP. Do NOT modify any files in the repository, do NOT create commits, do NOT push. The orchestrator routes the BLOCKED report to the appropriate narrow re-review.
+
+      **BLOCKED is legitimate whether discovered at first read OR during impl** — the protocol does not require attempting impl before raising it. If you read the sealed acceptance artefact and spot a defect immediately, return BLOCKED without writing any code.
 
       ### HARD RULE — BLOCKED not accommodate
 
@@ -652,7 +675,7 @@ phases:
       - Do NOT widen tolerances inline (`<= 10` → `<= 11`) to absorb real doctrine drift.
       - Do NOT change strict-equality pins (`=== 6.25` → `=== 0`) inline even when the new value is mathematically correct.
       - Do NOT amend `behavioral.md`/`spec.md` inline to match implementation reality.
-      - Do NOT modify the sealed acceptance file in any way under any circumstance.
+      - Do NOT modify the sealed acceptance file inline from the IMPLEMENT phase. Modifications are permitted only via the orchestrator-driven audit-locked seal-break cycle (SEAL BROKEN commit → narrow re-review APPROVE → re-seal commit on a separate branch state, NOT bundled into the impl commit) — see the seal-break protocol documented in TEST_ADVERSARY's success-transition.
 
       Report instead:
 
@@ -678,14 +701,14 @@ phases:
 
       Before authoring ANY new top-level helper, loader, formatter, type/interface, React component, server action, hook, test/spec scaffold, or shared utility, you MUST grep the repo for an existing equivalent. Search by **behavior, not just name** — scan sibling `*-data.ts`, `_loaders/`, `__tests__/`, `e2e/`, `packages/*/src/`, `lib/`, `utils/`, AND project UI primitive packages (e.g. `@<scope>/ui`, `<repo>/components/ui/`). If a byte-identical or near-identical implementation already exists:
 
-      1. **Consume or extend it** — import the existing symbol, or parametrise it (add an options arg) so both call sites share one source. When variants diverge, adopt the *safe superset* (e.g. a try/catch wrapper) — never silently narrow behaviour.
-      2. If consuming is impossible WITHOUT a shared module the spec did not anticipate (no `_shared/`, cross-package boundary, existing copy is test-scope but you need prod-scope), STOP and return:
+      1. **Consume or extend it** (no BLOCKED needed) — import the existing symbol, or parametrise it (add an options arg) so both call sites share one source. When variants diverge, adopt the *safe superset* (e.g. a try/catch wrapper) — never silently narrow behaviour. Consume-and-extend is the GREEN path; proceed inline.
+      2. If consuming is impossible WITHOUT a shared module the spec did not anticipate (no `_shared/`, cross-package boundary, existing copy is test-scope but you need prod-scope), STOP and return BLOCKED:
 
-           BLOCKED: <symbol> duplicates <existing path:line>; consolidating needs <shared module> not in the spec; recommend spec amendment.
+           BLOCKED: 7d-duplication — <symbol> duplicates <existing path:line>; consolidating needs <shared module> not in the spec; recommend spec amendment.
 
          Do NOT copy-paste "to consolidate later." A copy carrying a `// Mirrors <other file> verbatim` comment is the exact anti-pattern this rule exists to stop.
 
-      **7d UI-primitive widening (added 2026-05-22 after E11-03 #119):** when authoring React components, hooks, or browser-side helpers, the grep MUST include the project's UI primitive package(s) (Dialog, Badge, Alert, Popover, Toast, Skeleton, etc.) and the project's `lib/` utilities (date/time formatters, debounce hooks, browser-event listeners). Reinventing a primitive that already exists in the shared UI package is the same sub-check 7d violation as reimplementing a backend symbol. Also: a helper named identically to an existing project helper (e.g. two `formatRelativeTime` functions in different files) is a name-collision risk even if the contracts differ — rename the new one or parametrise the existing one.
+      **7d UI-primitive widening:** when authoring React/Vue/Svelte components, hooks, or browser-side helpers, the grep MUST include the project's UI primitive package(s) (Dialog, Badge, Alert, Popover, Toast, Skeleton, etc.) AND the project's `lib/` / `utils/` directories (date/time formatters, debounce hooks, browser-event listeners). Reinventing a primitive that already exists in the shared UI package is the same sub-check 7d violation as reimplementing a backend symbol. Also: a helper named identically to an existing project helper (e.g. two `formatRelativeTime` functions in different files) is a name-collision risk even when the contracts genuinely differ — rename the new one or parametrise the existing one.
 
       Genuine divergence is NOT duplication: if the near-copy has a real contract-required difference (Ascending vs Descending sort, 1-dp vs 2-dp format), keep it separate AND document why in a leading comment. This rule targets accidental copy-paste, not intentional twins.
 
@@ -726,7 +749,7 @@ phases:
   # Phase 3b: Engine-executed Acceptance Test Runner
   - id: acceptance_run
     name: "Acceptance Test Runner"
-    description: "Engine executes pytest directly on acceptance_tests.py — no agent. Writes engine-verified results to acceptance_results.json."
+    description: "Engine (or orchestrator skill) executes the acceptance test directly — no agent. Dispatches per config.language: pytest for Python (acceptance_tests.py), jest for TypeScript/JavaScript (acceptance_tests.js/.ts), go test for Go (acceptance_tests_test.go), bash for shell verify-scripts (scripts/verify-<issue>.sh). Writes engine-verified results to acceptance_results.json. For non-Python languages, the orchestrator skill (orchemist-run.md) implements the per-language dispatch; the engine handler defaults to pytest only when config.language is unset or 'python'."
     task_type: acceptance_run
     max_iterations: 3
     working_dir: "{config[repo_path]}"
@@ -816,25 +839,24 @@ phases:
          - Project shared libraries (`lib/`, `utils/`, `_shared/`)
          - Sibling files in the same directory (`*-data.ts`, `_loaders/`, `__tests__/`)
          - Cross-package symbols accessible via the workspace
-         A near-identical implementation in the codebase that the IMPLEMENT phase rebuilt from scratch is `[MAJOR][correctness]` — recommend refactor to consume the existing primitive, or rename to remove name-collision risk if contracts genuinely diverge. (Lesson recorded after a production E11-03 review missed three UI-primitive duplications: Dialog rebuilt vs `@scope/ui/Dialog`, Badge rebuilt vs `@scope/ui/Badge`, `formatRelativeTime` colliding with an existing helper of the same name in `lib/`. Reviewers MUST enumerate the project's primitive-export list before signing off on a feature that introduces React components or browser-side helpers.)
+         A near-identical implementation in the codebase that the IMPLEMENT phase rebuilt from scratch is `[MAJOR][correctness]` — recommend refactor to consume the existing primitive, or rename to remove name-collision risk if contracts genuinely diverge. (Lesson recorded after a production audit where a UI-feature PR missed three UI-primitive duplications: Dialog rebuilt while `@<your-org>/ui/Dialog` existed; Badge rebuilt while a sibling Badge primitive existed; a helper named identically to an existing project helper in `lib/`. Reviewers MUST enumerate the project's primitive-export list before signing off on a feature that introduces UI components or browser-side helpers.)
 
-         **Sub-check 5a (project carryover) — Inverse silent test amendment:** verify that any sealed test pin (numeric tolerance, strict-equality literal, exact-string assertion) is byte-identical to its state at the SEAL commit. If the IMPLEMENT phase modified a sealed pin without an accompanying audit-locked seal-break cycle (separate SEAL BROKEN commit + narrow re-review + re-seal), that is `[BLOCKER][correctness]` — inverse silent amendment. Even when the new pin is mathematically correct, the protocol violation is the issue. Recovery: route to retroactive narrow re-review for the audit lock.
+         **HARD RULE — Inverse silent test amendment:** verify that any sealed test pin (numeric tolerance, strict-equality literal, exact-string assertion) is byte-identical to its state at the SEAL commit. If the IMPLEMENT phase modified a sealed pin without an accompanying audit-locked seal-break cycle (separate SEAL BROKEN commit + narrow re-review + re-seal), that is `[BLOCKER][correctness]` — inverse silent amendment. Even when the new pin is mathematically correct, the protocol violation is the issue. Recovery: route to retroactive narrow re-review for the audit lock. (This rule is the REVIEW-phase guard for the same HARD RULE the IMPLEMENT phase enforces preemptively; the two are intentionally paired.)
 
       5. Seal-break audit-trail verification (when applicable):
 
-         If the branch contains any `SEAL BROKEN` commit, verify the canonical 4-commit chain:
+         If the branch contains any `SEAL BROKEN` commit, verify the canonical 4-commit chain (per PIPELINE.md Seal break protocol):
 
            1. `chore(#N): seal verify-<issue>.sh` (or equivalent SEAL commit) — records pre-amendment sha256
-           2. `test(#N): amend §<section> — SEAL BROKEN <reason>` — explicit SEAL BROKEN marker in body
-           3. Narrow re-review APPROVE recorded (commit body references the audit lock)
-           4. `chore(#N): re-seal verify-<issue>.sh after §<section> fix` — records post-amendment sha256
-           5. `feat(#N)`/`fix(#N)` impl commit AFTER the re-seal
+           2. `test(#N): amend §<section> — SEAL BROKEN <reason>` — explicit SEAL BROKEN marker in body; the narrow re-review APPROVE verdict is captured in this commit's body as audit-trail reference (not a separate commit)
+           3. `chore(#N): re-seal verify-<issue>.sh after §<section> fix` — records post-amendment sha256
+           4. `feat(#N)`/`fix(#N)` impl commit AFTER the re-seal
 
          Any deviation (bundled SEAL BROKEN + impl commit; missing re-seal commit; missing audit-lock reference) is `[MAJOR][correctness]` — recovery is retroactive narrow re-review and a corrective re-seal commit.
 
       ## HARD RULE — Post-review-commit triggers new round
 
-      Any commit made after a reviewer's verdict triggers another reviewer round. Do NOT approve based on a stale state. If commits exist on the branch after this review's prior round (visible in `git log`), the verdict applies to the LATEST commit — do not assume earlier-round approvals carry forward.
+      Any commit made after a reviewer's verdict triggers another reviewer round. Do NOT approve based on a stale state. If commits exist on the branch after this review's prior round (visible in `git log`), the verdict applies to the LATEST commit — do not assume earlier-round approvals carry forward. This rule covers BOTH impl/fix commits AND reviewer self-amendments to `review.md` after the verdict line — do NOT silently edit the prior round's review; emit a new round (`review_roundN+1.md`) with a fresh verdict.
 
       ## Output
       Write your review to {output_dir}/review.md.
@@ -949,13 +971,13 @@ phases:
     prompt_template: |
       [PIPELINE CONTEXT] You are executing the POSTMORTEM phase of an automated coding pipeline. The review and fix phases exhausted their iteration limit without the reviewer approving the implementation. Your job is to extract the reviewer's unresolved findings and diagnose why the fix agent could not satisfy them. Do not ask questions or send messages. [/PIPELINE CONTEXT]
 
-      You are a technical analyst performing a postmortem on a failed review/fix cycle.
+      You are a technical analyst performing a postmortem on a failed review/fix OR test_adversary cycle.
 
       ## Pipeline Context
       **Issue:** {config[issue_title]} (#{config[issue_number]})
       **Repository:** {config[repo_path]}
       **Branch:** {config[branch_name]}
-      **What happened:** The reviewer and fix agent went through multiple rounds without the reviewer approving the implementation.
+      **What happened:** EITHER (a) the reviewer and fix agent went through multiple rounds without the reviewer approving the implementation, OR (b) the TEST_ADVERSARY (Phase 2c) and acceptance_test phases went through multiple rounds without the adversary approving the test artefact. Examine `{output_dir}/` to determine which case applies — presence of `review_round*.md` indicates the review/fix exhaustion; presence of `test_adversary_round*.md` without a sealed artefact indicates the test_adversary exhaustion.
 
       ## Current Files
       Read the latest review at: {output_dir}/review.md
@@ -965,8 +987,8 @@ phases:
 
       ## Round History
       Read ALL round files from {output_dir}/ to understand the full evolution:
-      - review_round1.md, fix_round1.md, review_round2.md, fix_round2.md, etc.
-      - These files contain the complete review/fix exchange across all rounds
+      - **For review/fix exhaustion:** `review_round1.md`, `fix_round1.md`, `review_round2.md`, `fix_round2.md`, etc. — these contain the complete review/fix exchange across all rounds.
+      - **For test_adversary exhaustion:** `test_adversary_round1.md`, `acceptance_test_round2.md` (the revision-round artefact), `test_adversary_round2.md`, etc. — these contain the test-artefact ↔ adversary exchange across all rounds.
 
       ## Your Task
 
@@ -990,11 +1012,11 @@ phases:
   # Phase 5: Test Verification (Command Phase)
   - id: test
     name: "Test Verification"
-    description: "Run full test suite to verify no regressions"
+    description: "Run full test suite to verify no regressions. Command resolves from config.test_command; allowed_commands lists the safelisted executables per language."
     task_type: command
     command: "{config[test_command]}"
     working_dir: "{config[repo_path]}"
-    allowed_commands: ["python3", "python", "pytest"]
+    allowed_commands: ["python3", "python", "pytest", "npm", "npx", "pnpm", "yarn", "node", "jest", "vitest", "go", "bash", "sh", "make"]
 
 # Auto-merge configuration
 auto_merge:
