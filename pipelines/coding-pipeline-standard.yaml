@@ -281,6 +281,28 @@ phases:
       4. **Leakage** — Does behavioral.md name internal methods, class names, or implementation details from spec.md? If yes → REJECT. (You must read spec.md to detect what constitutes "internal details".)
       5. **Alignment** — Do behavioral contracts match what spec.md describes? Are there implementation paths in spec.md with no corresponding behavioral contract? Divergence → REJECT
 
+      ## Project sub-checks (apply on top of the five canonical checks)
+
+      These sub-checks generalize lessons accumulated across production pipeline runs. Each catches a class of contract weakness that the five canonical checks alone do not surface.
+
+      ### 1a — Cross-layer identifier mapping
+      Every identifier-shaped string that crosses a layer (HTTP wire ↔ application ↔ database; user-facing ↔ internal) MUST be pinned to its exact external-API field shape. Examples: UUID format (8-4-4-4-12 hex with hyphens), CIK left-padded to 10 digits, ticker symbol canonicalization rules, ISO-8601 timestamp precision (`\d{3}Z` not `.\d+Z` — the unescaped dot matches any character). If the behavioral contract says "session ID is a UUID" without pinning the exact shape, flag `[vague]` with the contract id.
+
+      ### 1b — Stable diagnostic codes
+      When a contract anchors on tool output (compiler errors, linter messages, test failures, HTTP error responses), the anchor MUST be on the STABLE error code (e.g. `TS2353`, `no-unused-vars`, SQLSTATE, HTTP status) — NOT on human-facing message prose. Message text drifts across tool versions; codes are part of the tool's public API. Flag `[vague]` if a contract anchors only on prose.
+
+      ### 1c — Dev-mode instrumentation noise filter
+      When asserting HTTP response body content for status-code markers, use canonical error-page phrases (`HTTP 500`, `Internal Server Error`, `Application error: a server-side exception`) — NOT bare digit substrings. Modern frameworks emit debug payloads with performance-timing numbers, hashes, and line numbers; a bare `500` false-positives on `performance.now()` timestamps and React 19 RSC Flight chunks. Flag `[vague]` when a contract matches a 3-digit HTTP code without anchoring context.
+
+      ### 5a — Closed-union set-equality
+      Any closed union the spec declares (error taxonomies, status enums, kind discriminators) MUST be covered set-equally in behavioral.md: every union member appears in at least one Given/When/Then contract. Count members in spec vs members covered in behavioral; flag `[missing_edge_case]` for any uncovered member. This generalizes the discriminated-union exhaustiveness check beyond TypeScript to any language.
+
+      ### 5b — Deferred-as-ok discipline (acceptance-test concern, flagged here as smell)
+      If the spec or behavioral leaks language like "we'll skip this in tests" or "this contract will be deferred" without naming the canonical `defer_contract` helper (or the language equivalent), flag `[trivial]`. A contract that is genuinely unverifiable at acceptance-time MUST be marked explicitly deferred via a dedicated counter — never silently counted as passing.
+
+      ### 7d — Re-implementation of an existing symbol (spec-level smell)
+      If the spec proposes authoring a new helper, loader, formatter, type, component, hook, or utility that duplicates an existing symbol in the codebase, flag `[divergence]`. The IMPLEMENT phase has its own 7d HARD RULE that returns BLOCKED on duplication; catching the proposal at SPEC stage saves a full pipeline round. Search includes: project UI primitive package(s), `lib/`/`utils/`, sibling `*-data.ts`, `_loaders/`, `_shared/`. Genuine divergence (different sort order, different precision, different sealed string) is not duplication — but the spec must call it out explicitly.
+
       ## Output Format
 
       Your response MUST start with one of these on the very first line:
@@ -348,15 +370,18 @@ phases:
   # Phase 2: Behavioral Acceptance Tests
   - id: acceptance_test
     name: "Behavioral Acceptance Tests"
-    description: "Write behavioral tests from contracts ONLY — never from implementation. These become immutable constraints for the implementing agent. Behavioral contracts have been adversarially reviewed before reaching this phase."
+    description: "Write behavioral tests from contracts ONLY — never from implementation. These become immutable constraints for the implementing agent. Behavioral contracts have been adversarially reviewed before reaching this phase. Test format switches on {config[language]}: pytest (Python), jest (TypeScript/JavaScript), `go test` (Go), or bash verify-script (bash)."
     model_tier: sonnet
     thinking_level: high
     transitions:
-      success: implement
+      success: test_adversary
       failed: acceptance_test
       timeout: acceptance_test
     protected_outputs:
       - acceptance_tests.py
+      - acceptance_tests.js
+      - acceptance_tests_test.go
+      - "scripts/verify-*.sh"
     prompt_template: |
       [PIPELINE CONTEXT] You are executing the ACCEPTANCE_TEST phase. Write tests from behavioral contracts only. You have NO access to implementation details — this is by design. Do not ask questions or send messages. [/PIPELINE CONTEXT]
 
@@ -379,21 +404,74 @@ phases:
       You have no access to implementation details. This is by design.
 
       ## Task
-      1. Read the behavioral contracts carefully
-      2. Write a Python test file `{output_dir}/acceptance_tests.py` that:
-         - Contains pytest tests expressing behavioral contracts of the form:
-           "when I call X with Y, it produces Z"
-         - Tests are derived ONLY from behavioral.md — do not assume implementation details
-         - DO NOT test for specific method names, private functions, or class internals
-         - DO NOT test that a specific function exists — test that a BEHAVIOR works
-         - ❌ Wrong: "assert hasattr(obj, '_extract_code_quality')"
-         - ✅ Right: "assert scorer.compute(with_quality_data) > scorer.compute(without_quality_data)"
-         - Each test function has a clear docstring stating the behavioral contract
-         - Tests use `pytest` and standard Python imports only
-         - Tests are runnable: they import from the actual repo path `{config[repo_path]}`
-         - Add `sys.path.insert(0, '{config[repo_path]}')` or `sys.path.insert(0, str(Path('{config[repo_path]}').parent))` at the top
-         - Cover: happy path, edge cases, error cases, and boundary conditions
-         - Aim for 5-15 focused behavioral tests
+
+      Test format depends on `{config[language]}`:
+
+      ### Python — write `{output_dir}/acceptance_tests.py`
+      - Contains pytest tests expressing behavioral contracts of the form: "when I call X with Y, it produces Z"
+      - Tests use `pytest` and standard Python imports only
+      - Add `sys.path.insert(0, '{config[repo_path]}')` or `sys.path.insert(0, str(Path('{config[repo_path]}').parent))` at the top
+      - Aim for 5-15 focused behavioral tests
+
+      ### TypeScript / JavaScript — write `{output_dir}/acceptance_tests.js` (or `.ts`)
+      - Contains jest tests (`describe`/`it`/`expect`)
+      - Add `import { ... } from '{config[repo_path]}/...'` resolving to the production code paths
+      - Aim for 5-15 focused behavioral tests
+
+      ### Go — write `{output_dir}/acceptance_tests_test.go`
+      - Contains `func TestXxx(t *testing.T)` tests
+      - Tests import the production package by path
+      - Aim for 5-15 focused behavioral tests
+
+      ### Bash (verify-script — project deviation, used when behavioral contracts span shell-orchestrated workflows: real-DB integration, CLI dev-server harnesses, multi-package build gates)
+
+      Write `{config[repo_path]}/scripts/verify-<issue>.sh` where `<issue>` is the issue identifier (e.g. `E11-03` or `119`). The script:
+
+      - Uses `set -uo pipefail` (NOT `set -e` — see sub-check 2a in the TEST_ADVERSARY prompt for why)
+      - Uses the `if VAR=$(cmd); then ...; else ...; fi` form (NOT `var=$(cmd); if [ "$?" -eq 0 ]; ...` which crashes silently under `set -e`)
+      - Single-quoted grep patterns; `grep -c ... || true` to avoid pipefail exit-1 on zero match
+      - Probe directories under `{config[repo_path]}/.verify-<issue>-probe/` (NOT bare `/tmp` — `tsc moduleResolution: "bundler"` needs hoisted node_modules)
+      - EXIT-trap cleanup that reaps process groups (`kill -- -$PGID`) + removes probe directories + leaves ports free
+      - Per-probe tsconfigs with `"files": ["<probe>"]` (NOT `--project tsconfig.json <file>` — the latter emits TS5042 instead of TS2322/TS2353)
+      - Numbered sections (§0, §1, ..., §seal) with a header comment block mapping each section to the behavioral contracts it covers
+      - Helpers: `ok "<msg>"` / `bad "<msg>"` / `note "<msg>"` increment counters (passes/fails/notes) AFTER the test result is known (NEVER inside `$(...)` substitution — exit code gets swallowed)
+      - **`defer_contract` helper** (REQUIRED — see canonical body below): for contracts genuinely unverifiable at script-run time (live network, runtime-only DB state, fixture machinery not yet wired). NEVER use `ok "...DEFERRED..."` — that inflates the pass counter (sub-check 5b anti-pattern).
+      - Final summary regex: `^✓ PASS — [0-9]+ passed / [0-9]+ failed / [0-9]+ deferred` on success; `^✗ FAIL — ...` on failure. Exit 0 iff failed == 0.
+
+      Canonical `defer_contract` body:
+
+      ```bash
+      defer_contract() {
+          local contract_id="$1"
+          local reason="$2"
+          printf '  \033[33m⊘\033[0m %s — DEFERRED: %s\n' "$contract_id" "$reason"
+          deferred=$((deferred + 1))
+          deferred_list+=("$contract_id")
+      }
+      ```
+
+      Companion init at the top of the script: `deferred=0` and `deferred_list=()` alongside `passes=0` `fails=0`.
+
+      Canonical seal banner (§1 — printed at runtime, NOT hardcoded-checked — the sha256 is recorded in the Phase-2c SEAL commit body):
+
+      ```bash
+      SELF_SHA=$(sha256sum "$ROOT/scripts/verify-<issue>.sh" | awk '{print $1}')
+      printf '  sha256: %s = %s\n' "scripts/verify-<issue>.sh" "$SELF_SHA"
+      ```
+
+      Aim for as many sections as the behavioral contracts require; common per-issue range is 8-18 sections. Every contract in `behavioral.md` MUST either be covered by a positive `ok`/`bad` assertion OR marked via `defer_contract <id> "<reason>"`. The orchestrator's PASS gate (Phase 7 ACCEPTANCE) verifies the contract count in behavioral.md matches (passes + deferred) in script output.
+
+      ## Common rules for all languages
+
+      - Tests are derived ONLY from behavioral.md — do not assume implementation details
+      - DO NOT test for specific method names, private functions, or class internals
+      - DO NOT test that a specific function exists — test that a BEHAVIOR works
+      - ❌ Wrong: "assert hasattr(obj, '_extract_code_quality')"
+      - ✅ Right: "assert scorer.compute(with_quality_data) > scorer.compute(without_quality_data)"
+      - Each test (or numbered bash section) has a clear comment/docstring stating the behavioral contract it covers
+      - Cover: happy path, edge cases, error cases, boundary conditions
+      - Public contract surface (HTTP routes, action signatures, exact rendered strings, closed-union members) IS the contract and IS testable; private helper names are leakage
+
       3. Initialize acceptance results by writing `{output_dir}/acceptance_results.json`:
          ```json
          {{
@@ -414,6 +492,115 @@ phases:
       - List of behavioral contracts (one per test)
       - Rationale for each contract (what aspect of the spec it validates)
       - Any ambiguities in the spec that required assumptions
+
+  # Phase 2c: Test Adversary (project deviation from canonical orchemist)
+  #
+  # This phase reviews the acceptance test artifact (Python pytest, JS jest,
+  # Go test files, or bash verify script) for structural weaknesses BEFORE
+  # the test is sealed and the implementation phase begins. The orchemist
+  # canonical pipeline trusts pytest as structurally sound; this is correct
+  # for Python projects. Bash verify scripts have more surface for structural
+  # mistakes (heredoc parse errors, quote-aware bugs, GraphQL schema drift,
+  # path-math defects, broken grep anchors) — hence this added loop.
+  #
+  # Static review here does NOT catch RUNTIME bugs in the test — those
+  # surface in Phase 3 (IMPLEMENT) as BLOCKED reports routed back via
+  # seal-break. This phase is for STRUCTURAL weaknesses only.
+  #
+  # On APPROVE, the orchestrator MUST seal the acceptance artifact:
+  #   1. Stage the acceptance test file
+  #   2. Commit with message `chore(#N): seal <acceptance-file> — Phase 2c SEAL`
+  #   3. Record the file's sha256 in the commit body
+  # The IMPLEMENT phase reads the sealed sha256 and any drift triggers a
+  # BLOCKED → narrow re-review → audit-locked re-seal cycle (see HARD RULE
+  # — Inverse silent test amendment in the IMPLEMENT phase).
+  - id: test_adversary
+    name: "Acceptance Test Adversary Review"
+    description: "Adversarially review the acceptance test artifact for structural weaknesses — over-loose regex, trivial-satisfaction gates, missing edge-case probes, internal-implementation leakage, broken anchor patterns. Applies the canonical 5-check rubric plus project sub-checks adapted for bash/jest/pytest specifics. Loop cap 4."
+    model_tier: opus
+    thinking_level: high
+    max_iterations: 4
+    transitions:
+      approve: implement
+      request_changes: acceptance_test
+      exhausted: postmortem_review
+      failed: test_adversary
+      timeout: test_adversary
+      success: test_adversary  # fallback: verdict extraction failure, loop conservatively
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing the TEST_ADVERSARY phase (round N/4) for issue #{config[issue_number]} of {config[repo_url]}. Your verdict determines whether the acceptance test in `{output_dir}/acceptance_tests.<ext>` (or `scripts/verify-<issue>.sh` for bash) is tight enough to gate the implementation. Behavioral contracts have already been approved in Phase 1c. You are reviewing the test translation of those contracts. Do not ask questions or send messages. Do not modify any files. Do not run the test. [/PIPELINE CONTEXT]
+
+      You are an adversarial acceptance-test reviewer. Apply the canonical orchemist spec_adversary rubric adapted for the acceptance-test artifact.
+
+      ## GROUND TRUTH — The Issue These Tests Must Verify
+      **Title:** {config[issue_title]}
+      **Body:** {config[issue_body]}
+
+      ## Behavioral contracts (approved in Phase 1c)
+      Read: {output_dir}/behavioral.md
+
+      ## Previous Work / Prior Rounds
+      {phase_summary}
+
+      {iteration_history}
+
+      ## Read
+      Read the acceptance test file at: `{output_dir}/acceptance_tests.py` (Python) OR `{output_dir}/acceptance_tests.js` (TS/JS) OR `{output_dir}/acceptance_tests_test.go` (Go) OR `{config[repo_path]}/scripts/verify-<issue>.sh` (bash) — switch on {config[language]}.
+
+      For bash verify scripts, also note the script's SHA256 (`sha256sum scripts/verify-<issue>.sh`) — the SEAL commit records this; you are reviewing the PRE-SEAL state.
+
+      ## Your Six Mandatory Checks (canonical 5 + project deviation #6)
+
+      1. **Specificity** — exact error codes; concrete grep patterns; no "reasonable budget" without a numeric cap.
+
+         **1b — Stable diagnostic codes (project sub-check):** when an acceptance probe regex-matches tool output (tsc, eslint, pytest, jq), anchor on the STABLE error code (`TS2353`, `no-unused-vars`, `test-id`, SQLSTATE) rather than human-facing message prose. Message text drifts across tool versions; codes are part of the tool's public API. Flag as `[vague]` if the only match is against prose.
+
+         **1c — Dev-mode instrumentation noise filter (project sub-check):** when asserting HTTP response body content for status-code markers, use canonical error-page phrases (`HTTP 500`, `Internal Server Error`, `Application error: a server-side exception`) NOT bare digit substrings. Dev-mode frameworks emit debug payloads with performance-timing numbers, hashes, and line numbers; a bare `500` false-positives on `performance.now()` timestamps and RSC Flight debug chunks. Flag as `[vague]` when a grep matches a 3-digit HTTP code without anchoring context.
+
+         **1d — TS `as` cast bypass in reject probes (project sub-check):** in TypeScript reject probes (code that demonstrates rejection of an invalid literal — TS2322 / TS2339 / TS2353 / etc.), the load-bearing literal MUST NOT be wrapped in an `as` type assertion. `as` collapses the literal to the asserted type at the cast site, so an incompatible value silently widens and the probe passes without proving anything. Canonical fix: typed `const` LHS with direct literal assignment, OR `satisfies` for narrowing without assertion. Flag as `[trivial]` with the file:line of the `as` cast.
+
+      2. **Trivial satisfaction** — could a stub or no-op pass each section? Probe hard: does the test actually exercise the behaviour, or just file existence / status code / loose regex?
+
+         **2a — Bash `set -euo pipefail` gotcha (project sub-check, bash-specific):** if the script uses `set -euo pipefail`, scan for the pattern `var=$(cmd-that-can-exit-nonzero); if [ "$?" -eq 0 ]; then ok; else bad; fi`. This crashes the script silently — bash exits at the assignment BEFORE the `if` runs, `bad` never prints, fail counter never increments, `set -e` propagates out. The commonly-believed "assignments mask set -e" rule does NOT apply to this specific pattern. Canonical fix: `if var=$(cmd); then ok; else bad; fi` (if-as-command form) OR `set +e` / capture `rc=$?` / `set -e` wrap. Flag as `[trivial]` with the fix pattern.
+
+         **2b — Unquoted variable in nested heredocs (project sub-check, bash-specific):** scan multi-level `$(... | python3 <<PY ... $VAR ... PY)` patterns for unquoted bash variable expansions INSIDE the python (or similar) heredoc. If the variable contains spaces, JSON content, or word-like tokens, bash may interpret the expansion as a command when the heredoc is re-parsed. Surfaces at runtime as "command not found" with clean `bash -n`. Prefer `os.environ.get(...)` + `ENV_VAR="$var"` prefix for bash→python passing.
+
+         **2c — Async-indexer stability wait (project sub-check):** when a §N captures a pre/post delta against an eventually-consistent backing store (event queues, queue-count metrics, search indices, replication-lag), the baseline MUST be stable before the probe runs. Pattern: poll the count until two successive reads match (bounded by timeout). Flag as `[missing_edge_case]` when a §N probe reads `count` once, emits, sleeps, reads `count` again, and asserts `delta == N` without a stability wait — prior-section events that finish indexing during the probe are misattributed.
+
+      3. **Edge case coverage** — port hygiene preflight; liveness checks inside poll loops; max-wait on all polls; cleanup trap reaps process group; probe-dir removal in cleanup.
+
+      4. **Leakage** — test asserts specific function names, class names, or module paths instead of observable behaviour. Public contract surface (HTTP routes, action signatures, exact rendered strings) IS the contract and is NOT leakage; private helper names are.
+
+      5. **Alignment** — every behavioral contract has ≥1 assertion; no assertions for behaviours outside the issue.
+
+         **5a — Closed-union set-equality (project sub-check):** for each closed union the behavioral contracts declare (error taxonomies, status enums, kind discriminators), enumerate the union members and verify the acceptance test exercises every one. Flag `[missing_edge_case]` for any uncovered member.
+
+         **5b — Deferred-as-ok inflation (project sub-check, acceptance-test specific):** scan for any `ok ".*DEFERRED.*"`, `ok ".*PENDING.*"`, or `ok ".*SKIPPED.*"` lines (or the language equivalent — pytest `@pytest.mark.xfail(strict=False)`, jest `it.skip`). The `ok` helper increments the pass counter, so a contract that was NOT exercised at script-run time gets counted as exercised. Canonical fix: a `defer_contract` helper with a separate `deferred` counter and a summary section listing every deferred contract id. Flag `[trivial]` with the file:line.
+
+      6. **Cross-section state simulation (project sub-check, bash/multi-step specific)** — walk the sections in order, tracking per-test-entity cumulative state: rate-limit slots consumed, DB rows created/deleted/updated, session cookies captured/invalidated, seeded entity states. For each §N probe, verify its preconditions are SATISFIED by the accumulated state from §§1...N-1. Flag `[missing_edge_case]` when a §N asserts "user X emits event Y" while §M (M<N) exhausted X's quota — structurally impossible, but individual sections each look fine in isolation.
+
+      ## Prior-cycle lessons the test MUST respect
+
+      - Probe directories inside the repo root (NOT bare `/tmp`) — language-tooling like `tsc moduleResolution: "bundler"` needs hoisted node_modules.
+      - Heredoc `|| VAR=""` patterns OUTSIDE `$(...)` command substitution — bash 5.2 parse error otherwise.
+      - No `@ts-expect-error` in negative TS probes — it suppresses the diagnostic we want to catch.
+      - JSON payloads in `curl -d` use `\\"` (two backslashes) so the sent JSON has proper `\"` escaping.
+
+      ## Output Format
+
+      Line 1: `APPROVE` or `REQUEST_CHANGES` (no preamble).
+
+      For REQUEST_CHANGES, one finding per line:
+
+        [category] description with concrete pointer (file:line or §-header)
+
+      where category ∈ {vague, trivial, missing_edge_case, leakage, divergence}.
+
+      If APPROVE: write `APPROVE` followed by 1-2 sentences confirming the test artifact is structurally sound.
+
+      Write your full adversary review to `{output_dir}/test_adversary.md` (overwrite any prior round file with the current round's content).
+
+      Iteration cap: 4. If R4 returns REQUEST_CHANGES, stop and escalate — the test artifact's structural defects are unresolvable in the bounded loop.
 
   # Phase 3: Implementation
   - id: implement
@@ -448,11 +635,65 @@ phases:
 
       Do NOT invent functionality that is not in the issue above. The issue body is the source of truth for what this feature does — if `spec.md` is missing detail, fall back to the issue body, never to your own assumptions.
 
+      ## HARD RULES (return BLOCKED rather than violate any of these)
+
+      ### HARD RULE — BLOCKED not accommodate
+
+      If satisfying a sealed acceptance assertion would require adding a wrapper, shim package, synthetic log line, entrypoint override, or any new bootstrap file BEYOND what the issue body describes as deliverables, STOP. Do not add the workaround. Test-accommodation workarounds ship as design debt that costs entire follow-up pipelines to rip out. Instead return a BLOCKED report:
+
+        BLOCKED: test §N may be over-literal; observing <contract> requires <workaround>; recommend acceptance-test amendment.
+
+      Write this report to {output_dir}/implement.md and STOP. The orchestrator routes BLOCKED to a narrow acceptance-test review rather than papering over the issue in the code.
+
+      ### HARD RULE — Inverse silent test amendment (bidirectional)
+
+      The BLOCKED escape is BIDIRECTIONAL. Beyond "growing implementation to satisfy over-literal test", you MUST also stop and return BLOCKED when implementation reveals that a sealed test assert, behavioral pin, or numeric tolerance is mathematically/structurally WRONG for the doctrine implementation:
+
+      - Do NOT widen tolerances inline (`<= 10` → `<= 11`) to absorb real doctrine drift.
+      - Do NOT change strict-equality pins (`=== 6.25` → `=== 0`) inline even when the new value is mathematically correct.
+      - Do NOT amend `behavioral.md`/`spec.md` inline to match implementation reality.
+      - Do NOT modify the sealed acceptance file in any way under any circumstance.
+
+      Report instead:
+
+        BLOCKED: §N's pin <X> is mathematically incorrect for input <shape>; doctrine implementation produces <Y>; recommend acceptance-test amendment to <new pin>.
+
+      Both directions share one purpose: the **audit lock** (narrow re-review of the delta) is what legitimizes any movement of a sealed pin. Silent amendment makes the seal stale-on-claim — the seal still exists, but documents fiction. The IMPLEMENT mandate does not include "amend the contract on the fly," even when the amendment is mathematically necessary.
+
+      ### HARD RULE — TS `as` cast bypass in reject probes (sub-check 1d)
+
+      If a sealed acceptance §N is a TS reject probe (asserts that `tsc` emits a specific diagnostic on an invalid literal), you MUST NOT introduce an `as` type assertion on the load-bearing literal to make compilation work. `as` collapses the literal to the asserted type at the cast site, so the probe silently passes without proving rejection. Canonical fix: typed `const` LHS with direct literal assignment, OR `satisfies` for narrowing without assertion. If your only path to green is via an `as` cast, return BLOCKED — that is a test bug, not an implementation gap.
+
+      ### HARD RULE — Production-code-for-test-convenience (sub-check 7a)
+
+      The following IMPLEMENT-introduced production-code modifications are DISALLOWED when their sole purpose is to satisfy a sealed verify assertion:
+
+      1. **Test-only database migration** — a migration whose only consumer is a verify-script query (a column rename so a §N grep matches; an alias view; a CHECK-constraint relaxation that the production model never needs). Verify-query mismatches are test bugs, not migrations.
+      2. **Test-only env-var knob** — `process.env.X` reads (or equivalents in other languages) whose only effect is to alter test-environment behavior (idle timeouts, retry counts, log-format toggles, shutdown grace). Production code should not grow knobs production never sets.
+      3. **Test-only NODE_ENV (or equivalent) branching** — `if (process.env.NODE_ENV === "test") { ... }` branches in production modules that return different shapes for tests. Production code should be uniform; tests should observe production behavior, not a different code path.
+
+      If your only path to green is one of these patterns, return BLOCKED with the disallowed pattern name. The orchestrator (or REVIEWER) intervenes if the production behavior is correct and the script's assertion is wrong.
+
+      ### HARD RULE — Re-implementation of existing symbol (sub-check 7d)
+
+      Before authoring ANY new top-level helper, loader, formatter, type/interface, React component, server action, hook, test/spec scaffold, or shared utility, you MUST grep the repo for an existing equivalent. Search by **behavior, not just name** — scan sibling `*-data.ts`, `_loaders/`, `__tests__/`, `e2e/`, `packages/*/src/`, `lib/`, `utils/`, AND project UI primitive packages (e.g. `@<scope>/ui`, `<repo>/components/ui/`). If a byte-identical or near-identical implementation already exists:
+
+      1. **Consume or extend it** — import the existing symbol, or parametrise it (add an options arg) so both call sites share one source. When variants diverge, adopt the *safe superset* (e.g. a try/catch wrapper) — never silently narrow behaviour.
+      2. If consuming is impossible WITHOUT a shared module the spec did not anticipate (no `_shared/`, cross-package boundary, existing copy is test-scope but you need prod-scope), STOP and return:
+
+           BLOCKED: <symbol> duplicates <existing path:line>; consolidating needs <shared module> not in the spec; recommend spec amendment.
+
+         Do NOT copy-paste "to consolidate later." A copy carrying a `// Mirrors <other file> verbatim` comment is the exact anti-pattern this rule exists to stop.
+
+      **7d UI-primitive widening (added 2026-05-22 after E11-03 #119):** when authoring React components, hooks, or browser-side helpers, the grep MUST include the project's UI primitive package(s) (Dialog, Badge, Alert, Popover, Toast, Skeleton, etc.) and the project's `lib/` utilities (date/time formatters, debounce hooks, browser-event listeners). Reinventing a primitive that already exists in the shared UI package is the same sub-check 7d violation as reimplementing a backend symbol. Also: a helper named identically to an existing project helper (e.g. two `formatRelativeTime` functions in different files) is a name-collision risk even if the contracts differ — rename the new one or parametrise the existing one.
+
+      Genuine divergence is NOT duplication: if the near-copy has a real contract-required difference (Ascending vs Descending sort, 1-dp vs 2-dp format), keep it separate AND document why in a leading comment. This rule targets accidental copy-paste, not intentional twins.
+
       ## Previous Work
       {phase_summary}
 
       Read the spec at: {output_dir}/spec.md
-      Read the acceptance tests at: {output_dir}/acceptance_tests.py
+      Read the acceptance tests at the language-appropriate path: `{output_dir}/acceptance_tests.py` (Python) OR `{output_dir}/acceptance_tests.js` (TypeScript/JavaScript) OR `{output_dir}/acceptance_tests_test.go` (Go) OR `{config[repo_path]}/scripts/verify-<issue>.sh` (bash — Phase-2c SEAL commit body records the canonical sha256; the script is byte-stable and MUST NOT be modified by IMPLEMENT — any apparent defect is a candidate for SEAL BROKEN via narrow re-review).
 
       ## Repository
       **Path:** {config[repo_path]}
@@ -556,6 +797,44 @@ phases:
          - **Edge cases** — Missing error handling, boundary conditions?
          - **Backward compatibility** — Does it break existing behavior?
          - **Test coverage** — Are the changes adequately tested?
+
+      4. Project sub-checks (apply in addition to the 5 categories above):
+
+         **Sub-check 1d — TS `as` cast in reject probes:** any new `as` cast on a load-bearing literal in a TypeScript reject probe is `[BLOCKER][correctness]`. The cast collapses the literal to the asserted type — the probe silently passes without proving rejection. Canonical fix: typed `const` LHS with direct literal assignment, or `satisfies`.
+
+         **Sub-check 5a — Closed-union set-equality:** for each closed union declared by the spec or introduced by the diff, count the union members vs the test-coverage members. Every member MUST appear in at least one test. Flag `[MAJOR][test_coverage]` for any uncovered member.
+
+         **Sub-check 5b — Deferred-as-ok inflation:** scan the diff for any test-output line of the form `ok ".*DEFERRED.*"`, `ok ".*PENDING.*"`, or `ok ".*SKIPPED.*"` (or the language equivalent). The `ok` helper increments the pass counter — a contract that was NOT exercised inflates the summary. Canonical fix: a dedicated `defer_contract` helper with separate counter. Flag `[MAJOR][test_coverage]`.
+
+         **Sub-check 7a — Production-code-for-test-convenience:** any of the following IMPLEMENT-introduced production-code modifications added SOLELY to satisfy a sealed test assertion is `[BLOCKER][correctness]`:
+         - Test-only DB migration (column rename/alias/CHECK-relaxation whose only consumer is a verify query)
+         - Test-only env-var knob (`process.env.X` reads that only alter test-environment behavior)
+         - Test-only `NODE_ENV === 'test'` (or equivalent) branching in production modules
+
+         **Sub-check 7d — Re-implementation of existing symbol:** before approving, verify every NEW top-level helper / loader / formatter / type / component / hook / utility in the diff was checked against existing equivalents. Search by behavior, not just name:
+         - Project UI primitive package(s) (Dialog, Badge, Alert, Popover, Toast, Skeleton, Tooltip, Tabs, Card, Input, Button, Label, etc.)
+         - Project shared libraries (`lib/`, `utils/`, `_shared/`)
+         - Sibling files in the same directory (`*-data.ts`, `_loaders/`, `__tests__/`)
+         - Cross-package symbols accessible via the workspace
+         A near-identical implementation in the codebase that the IMPLEMENT phase rebuilt from scratch is `[MAJOR][correctness]` — recommend refactor to consume the existing primitive, or rename to remove name-collision risk if contracts genuinely diverge. (Lesson recorded after a production E11-03 review missed three UI-primitive duplications: Dialog rebuilt vs `@scope/ui/Dialog`, Badge rebuilt vs `@scope/ui/Badge`, `formatRelativeTime` colliding with an existing helper of the same name in `lib/`. Reviewers MUST enumerate the project's primitive-export list before signing off on a feature that introduces React components or browser-side helpers.)
+
+         **Sub-check 5a (project carryover) — Inverse silent test amendment:** verify that any sealed test pin (numeric tolerance, strict-equality literal, exact-string assertion) is byte-identical to its state at the SEAL commit. If the IMPLEMENT phase modified a sealed pin without an accompanying audit-locked seal-break cycle (separate SEAL BROKEN commit + narrow re-review + re-seal), that is `[BLOCKER][correctness]` — inverse silent amendment. Even when the new pin is mathematically correct, the protocol violation is the issue. Recovery: route to retroactive narrow re-review for the audit lock.
+
+      5. Seal-break audit-trail verification (when applicable):
+
+         If the branch contains any `SEAL BROKEN` commit, verify the canonical 4-commit chain:
+
+           1. `chore(#N): seal verify-<issue>.sh` (or equivalent SEAL commit) — records pre-amendment sha256
+           2. `test(#N): amend §<section> — SEAL BROKEN <reason>` — explicit SEAL BROKEN marker in body
+           3. Narrow re-review APPROVE recorded (commit body references the audit lock)
+           4. `chore(#N): re-seal verify-<issue>.sh after §<section> fix` — records post-amendment sha256
+           5. `feat(#N)`/`fix(#N)` impl commit AFTER the re-seal
+
+         Any deviation (bundled SEAL BROKEN + impl commit; missing re-seal commit; missing audit-lock reference) is `[MAJOR][correctness]` — recovery is retroactive narrow re-review and a corrective re-seal commit.
+
+      ## HARD RULE — Post-review-commit triggers new round
+
+      Any commit made after a reviewer's verdict triggers another reviewer round. Do NOT approve based on a stale state. If commits exist on the branch after this review's prior round (visible in `git log`), the verdict applies to the LATEST commit — do not assume earlier-round approvals carry forward.
 
       ## Output
       Write your review to {output_dir}/review.md.
