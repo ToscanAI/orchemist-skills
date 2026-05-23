@@ -1,9 +1,17 @@
 ---
 name: orchemist:spec
-description: Phase 1a of the Orchemist coding pipeline (spec loop). Interprets a GitHub issue into an implementation plan (Section B only) anchored to GROUND TRUTH. Does not write behavioral contracts. Triggers when /orchemist:spec is invoked or when /orchemist:run advances to the spec phase.
+description: Phase 1a of the Orchemist coding pipeline (spec loop). Interprets a GitHub issue into an implementation plan (Section B only) anchored to GROUND TRUTH. Does not write behavioral contracts. Delegates to a fresh general-purpose subagent so the spec writer's context does not leak into downstream behavioral / adversary phases. Triggers when /orchemist:spec is invoked or when /orchemist:run advances to the spec phase.
 ---
 
 # Implementation Spec phase
+
+This skill is a thin wrapper that delegates to a fresh `general-purpose` subagent. The spec writer MUST run in its own context window so that downstream phases (behavioral, adversary) review work that wasn't drafted in the orchestrator's main context. Per [[feedback_fresh_subagent_per_phase]] — the fresh-context-window property is non-negotiable; do NOT execute the prompt inline.
+
+## Step 1 — Delegate to the subagent
+
+Use the `Agent` (Task) tool to spawn a `general-purpose` subagent. Pass it the following prompt (verbatim — DO NOT summarise; the GROUND TRUTH anchor and revision rules are load-bearing):
+
+---
 
 [PIPELINE CONTEXT] You are executing the SPEC phase (1a/3) of the spec loop. Your output feeds the BEHAVIORAL phase — not the adversary directly. Write implementation guidance only. Do not write behavioral contracts. Do not ask questions or send messages. [/PIPELINE CONTEXT]
 
@@ -60,3 +68,17 @@ A full rewrite wastes tokens and loses adversary-approved content. Surgical edit
 
 ## Output contract
 Write exactly ONE file to `.orchemist/runs/<run-id>/spec.md` (this is `{{output_dir}}/spec.md`). The file must contain only the implementation spec body — no orchestration metadata. On success, end the file with the verdict word `success` on its own line.
+
+---
+
+## Step 2 — Verify subagent output
+
+After the subagent returns, verify that `{{output_dir}}/spec.md` exists and ends with the verdict word `success`. If the subagent failed to write the file (or wrote malformed output), write the following safe-default to `{{output_dir}}/spec.md` yourself:
+
+```
+spec subagent returned no recognisable output — defaulting to failed for safety.
+
+failed
+```
+
+This routes the pipeline back through the spec phase on the next iteration. Do NOT run the spec inline as a fallback — per [[feedback_fresh_subagent_per_phase]], the fresh-context-window property is non-negotiable.

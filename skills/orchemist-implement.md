@@ -1,17 +1,15 @@
 ---
 name: orchemist:implement
-description: Phase 3 of the Orchemist coding pipeline. Implements the feature, constrained by the acceptance tests written in phase 2 (which must NOT be modified). Switches to the feature branch, writes code, runs tests, commits, pushes. Triggers when /orchemist:implement is invoked or /orchemist:run advances to the implement phase.
+description: Phase 3 of the Orchemist coding pipeline. Implements the feature, constrained by the acceptance tests written in phase 2 (which must NOT be modified). Switches to the feature branch, writes code, runs tests, commits, pushes. Delegates to the orchemist-implementer subagent so the implementer runs with its own focused tool list and context budget. Triggers when /orchemist:implement is invoked or /orchemist:run advances to the implement phase.
 ---
 
 # Implementation phase
 
-This skill should be delegated to the `orchemist-implementer` subagent via the Task tool, so the implementer runs with its own focused tool list and context budget.
+This skill is a thin wrapper that delegates to the `orchemist-implementer` subagent. The implementer MUST run in its own context window with its own focused tool list and context budget — fresh-eye execution against the immutable acceptance tests. Per [[feedback_fresh_subagent_per_phase]] — the fresh-context-window property is non-negotiable; do NOT execute the prompt inline (the prior "If the Task tool is not available" inline-fallback was removed under this policy).
 
-### If the Task tool is not available
+## Step 1 — Delegate to the subagent
 
-Some Claude Code sessions are launched without the Task tool. If you cannot delegate, run the implement phase **inline** using the same prompt body below and the same output contract — the orchestrator's verdict contract is unchanged. You lose the fresh-context-window property of subagent delegation, but the phase still produces the correct artifact. Add a line `note: ran inline; Task tool unavailable` near the top of the resulting `implement.md` so the post-run summary records it.
-
-When delegating, pass the following prompt verbatim:
+Use the `Agent` (Task) tool to spawn the `orchemist-implementer` subagent. Pass it the following prompt (verbatim — DO NOT summarise; the IMMUTABLE CONSTRAINT and GROUND TRUTH anchors are load-bearing):
 
 ---
 
@@ -69,3 +67,17 @@ Write exactly ONE file to `.orchemist/runs/<run-id>/implement.md` (this is `{{ou
 - Commit hash
 
 On success, end `implement.md` with the verdict word `success` on its own line. If you wrote a `BLOCKED:` line, end with `failed` instead.
+
+---
+
+## Step 2 — Verify subagent output
+
+After the subagent returns, verify that `{{output_dir}}/implement.md` exists and ends with the verdict word `success` (or `failed` if the implementer wrote a `BLOCKED:` line). If the subagent failed to write the file (or wrote malformed output), write the following safe-default to `{{output_dir}}/implement.md` yourself:
+
+```
+implement subagent returned no recognisable output — defaulting to failed for safety.
+
+failed
+```
+
+This routes the pipeline back through the implement phase on the next iteration. Do NOT run the implementer inline as a fallback — per [[feedback_fresh_subagent_per_phase]], the fresh-context-window property is non-negotiable, and the prior inline-fallback escape hatch was removed.

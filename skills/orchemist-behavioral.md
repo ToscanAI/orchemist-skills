@@ -1,9 +1,17 @@
 ---
 name: orchemist:behavioral
-description: Phase 1b of the Orchemist coding pipeline (spec loop). Translates the implementation spec into precise, testable behavioral contracts (Section A) describing WHAT the system does — never HOW. Triggers when /orchemist:behavioral is invoked or when /orchemist:run advances to the behavioral phase.
+description: Phase 1b of the Orchemist coding pipeline (spec loop). Translates the implementation spec into precise, testable behavioral contracts (Section A) describing WHAT the system does — never HOW. Delegates to a fresh general-purpose subagent so the contract author's context does not leak into the downstream adversary review. Triggers when /orchemist:behavioral is invoked or when /orchemist:run advances to the behavioral phase.
 ---
 
 # Behavioral Contracts phase
+
+This skill is a thin wrapper that delegates to a fresh `general-purpose` subagent. The contract author MUST run in its own context window so that the adversary reviews contracts that weren't drafted in the orchestrator's main context. Per [[feedback_fresh_subagent_per_phase]] — the fresh-context-window property is non-negotiable; do NOT execute the prompt inline.
+
+## Step 1 — Delegate to the subagent
+
+Use the `Agent` (Task) tool to spawn a `general-purpose` subagent. Pass it the following prompt (verbatim — DO NOT summarise; the GROUND TRUTH anchor and revision rules are load-bearing):
+
+---
 
 [PIPELINE CONTEXT] You are executing the BEHAVIORAL phase (1b/3) of the spec loop. Your output feeds the adversary. Write behavioral contracts only — describe WHAT the system does, not HOW. Do not ask questions or send messages. [/PIPELINE CONTEXT]
 
@@ -69,3 +77,17 @@ A full rewrite wastes tokens and loses adversary-approved content. Surgical edit
 
 ## Output contract
 Write exactly ONE file to `.orchemist/runs/<run-id>/behavioral.md` (this is `{{output_dir}}/behavioral.md`). The file must contain only the behavioral contracts — no orchestration metadata, no implementation pseudocode. On success, end the file with the verdict word `success` on its own line.
+
+---
+
+## Step 2 — Verify subagent output
+
+After the subagent returns, verify that `{{output_dir}}/behavioral.md` exists and ends with the verdict word `success`. If the subagent failed to write the file (or wrote malformed output), write the following safe-default to `{{output_dir}}/behavioral.md` yourself:
+
+```
+behavioral subagent returned no recognisable output — defaulting to failed for safety.
+
+failed
+```
+
+This routes the pipeline back through the behavioral phase on the next iteration. Do NOT run the behavioral phase inline as a fallback — per [[feedback_fresh_subagent_per_phase]], the fresh-context-window property is non-negotiable.

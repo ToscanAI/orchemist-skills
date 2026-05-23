@@ -1,9 +1,17 @@
 ---
 name: orchemist:acceptance-test
-description: Phase 2 of the Orchemist coding pipeline. Writes behavioral acceptance tests from contracts ONLY (no access to implementation). These tests become the immutable constraint for the implement phase. Triggers when /orchemist:acceptance-test is invoked or /orchemist:run advances to the acceptance_test phase.
+description: Phase 2 of the Orchemist coding pipeline. Writes behavioral acceptance tests from contracts ONLY (no access to implementation). These tests become the immutable constraint for the implement phase. Delegates to the orchemist-tester subagent so the tester runs in its own context window with no access to drafter reasoning. Triggers when /orchemist:acceptance-test is invoked or /orchemist:run advances to the acceptance_test phase.
 ---
 
 # Behavioral Acceptance Tests phase
+
+This skill is a thin wrapper that delegates to the `orchemist-tester` subagent. The tester MUST run in its own context window with no access to implementation — by design, tests are derived from `behavioral.md` only. Per [[feedback_fresh_subagent_per_phase]] — the fresh-context-window property is non-negotiable; do NOT execute the prompt inline.
+
+## Step 1 — Delegate to the subagent
+
+Use the `Agent` (Task) tool to spawn the `orchemist-tester` subagent. Pass it the following prompt (verbatim — DO NOT summarise; the GROUND TRUTH anchor and no-implementation-access constraints are load-bearing):
+
+---
 
 [PIPELINE CONTEXT] You are executing the ACCEPTANCE_TEST phase. Write tests from behavioral contracts only. You have NO access to implementation details — this is by design. Do not ask questions or send messages. [/PIPELINE CONTEXT]
 
@@ -73,3 +81,17 @@ Write exactly ONE summary file to `.orchemist/runs/<run-id>/acceptance_test.md` 
 - Any ambiguities in the spec that required assumptions
 
 Also write the language-specific test file (per the table in step 2) and `{{output_dir}}/acceptance_results.json` as described above. On success, end `acceptance_test.md` with the verdict word `success` on its own line.
+
+---
+
+## Step 2 — Verify subagent output
+
+After the subagent returns, verify that `{{output_dir}}/acceptance_test.md` exists and ends with the verdict word `success`, AND that the language-appropriate test file exists (per the table above). If the subagent failed to write either file (or wrote malformed output), write the following safe-default to `{{output_dir}}/acceptance_test.md` yourself:
+
+```
+acceptance_test subagent returned no recognisable output or did not produce the language-appropriate test file — defaulting to failed for safety.
+
+failed
+```
+
+This routes the pipeline back through the acceptance_test phase on the next iteration. Do NOT run the tester inline as a fallback — per [[feedback_fresh_subagent_per_phase]], the fresh-context-window property is non-negotiable.
