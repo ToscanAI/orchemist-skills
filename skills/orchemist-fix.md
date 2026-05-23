@@ -1,9 +1,17 @@
 ---
 name: orchemist:fix
-description: Phase 4b of the Orchemist coding pipeline. Applies the code review feedback from review.md by addressing each blocker and major issue with the minimum-diff change. Re-runs tests, commits, pushes. Triggers when /orchemist:fix is invoked or /orchemist:run advances to the fix phase after a REQUEST_CHANGES verdict.
+description: Phase 4b of the Orchemist coding pipeline. Applies the code review feedback from review.md by addressing each blocker and major issue with the minimum-diff change. Re-runs tests, commits, pushes. Delegates to a fresh general-purpose subagent so each fix round has fresh eyes on the review findings — no inherited reasoning from the implementer or prior fix rounds. Triggers when /orchemist:fix is invoked or /orchemist:run advances to the fix phase after a REQUEST_CHANGES verdict.
 ---
 
 # Apply Review Fixes phase
+
+This skill is a thin wrapper that delegates to a fresh `general-purpose` subagent. The fix author MUST run in its own context window — fresh eyes on the review findings, no inherited reasoning from the implementer or prior fix rounds. Per [[feedback_fresh_subagent_per_phase]] — the fresh-context-window property is non-negotiable; do NOT execute the prompt inline.
+
+## Step 1 — Delegate to the subagent
+
+Use the `Agent` (Task) tool to spawn a `general-purpose` subagent. Pass it the following prompt (verbatim — DO NOT summarise; the GROUND TRUTH anchor and anti-tampering rules are load-bearing):
+
+---
 
 [PIPELINE CONTEXT] You are executing the FIX phase of an automated coding pipeline. Your output feeds a re-review — not a human. Do not ask questions, request clarification, or send messages to external channels. Deliver your complete output as structured text following the format below. [/PIPELINE CONTEXT]
 
@@ -58,3 +66,17 @@ Write exactly ONE file to `.orchemist/runs/<run-id>/fix.md` (this is `{{output_d
 - Commit hash
 
 On success, end the file with the verdict word `success` on its own line. If you wrote a `BLOCKED:` line at the top, end with `failed` instead.
+
+---
+
+## Step 2 — Verify subagent output
+
+After the subagent returns, verify that `{{output_dir}}/fix.md` exists and ends with the verdict word `success` (or `failed` if the subagent wrote a `BLOCKED:` line). If the subagent failed to write the file (or wrote malformed output), write the following safe-default to `{{output_dir}}/fix.md` yourself:
+
+```
+fix subagent returned no recognisable output — defaulting to failed for safety.
+
+failed
+```
+
+This routes the pipeline back through the fix phase on the next iteration (within the review→fix iteration cap). Do NOT run the fix inline as a fallback — per [[feedback_fresh_subagent_per_phase]], the fresh-context-window property is non-negotiable.

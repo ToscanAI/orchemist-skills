@@ -1,9 +1,17 @@
 ---
 name: orchemist:review
-description: Phase 4 of the Orchemist coding pipeline. Senior code review (Opus-tier) on the diff between main and the feature branch. Checks correctness, security, edge cases, backward compatibility, and test coverage. Returns APPROVE, REQUEST_CHANGES, or ABORT. Triggers when /orchemist:review is invoked or /orchemist:run advances to the review phase.
+description: Phase 4 of the Orchemist coding pipeline. Senior code review (Opus-tier) on the diff between main and the feature branch. Checks correctness, security, edge cases, backward compatibility, and test coverage. Returns APPROVE, REQUEST_CHANGES, or ABORT. Delegates to a fresh general-purpose subagent with model opus so the reviewer has independent eyes on the diff. Triggers when /orchemist:review is invoked or /orchemist:run advances to the review phase.
 ---
 
 # Code Review phase
+
+This skill is a thin wrapper that delegates to a fresh `general-purpose` subagent. The reviewer MUST run in its own context window — clean of drafter or implementer reasoning — so the verdict on the diff is genuinely independent. Per [[feedback_fresh_subagent_per_phase]] — the fresh-context-window property is non-negotiable; do NOT execute the prompt inline.
+
+## Step 1 — Delegate to the subagent
+
+Use the `Agent` (Task) tool to spawn a `general-purpose` subagent **with `model: "opus"`** (per [[feedback_max_effort_adversary_reviewer]] — the reviewer is a critical quality gate and warrants max-effort reasoning). Pass it the following prompt (verbatim — DO NOT summarise; the GROUND TRUTH anchor and structured output format are load-bearing):
+
+---
 
 [PIPELINE CONTEXT] You are executing the REVIEW phase. Your verdict determines whether the code proceeds to testing or goes back for fixes. Do not ask questions or send messages. [/PIPELINE CONTEXT]
 
@@ -92,3 +100,16 @@ between the verdict line and the issue lines.
 
 ## Output contract
 Write exactly ONE file to `.orchemist/runs/<run-id>/review.md` (this is `{{output_dir}}/review.md`). The FIRST line must be `APPROVE`, `REQUEST_CHANGES`, or `ABORT` (nothing else). On approval, end the file with `APPROVE` on its own line. On request_changes, end with `REQUEST_CHANGES`. On abort, end with `ABORT`.
+
+---
+
+## Step 2 — Verify subagent output
+
+After the subagent returns, verify that `{{output_dir}}/review.md` exists and that its FIRST line is `APPROVE`, `REQUEST_CHANGES`, or `ABORT`. If the subagent failed to write the file (or wrote malformed output), write the following safe-default to `{{output_dir}}/review.md` yourself:
+
+```
+REQUEST_CHANGES
+[BLOCKER][correctness] Review subagent returned no recognisable verdict — defaulting to REQUEST_CHANGES for safety. Never assume APPROVE from ambiguous output.
+```
+
+This mirrors the engine's safe-default behaviour for the adversary phase: never assume APPROVE from ambiguous output. Do NOT run the reviewer inline as a fallback — per [[feedback_fresh_subagent_per_phase]], the fresh-context-window property is non-negotiable.

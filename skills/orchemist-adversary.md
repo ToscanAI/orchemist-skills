@@ -9,7 +9,7 @@ This skill is a thin wrapper that delegates to the `orchemist-adversary` subagen
 
 ## Step 1 — Delegate to the subagent
 
-Use the Task tool to spawn the `orchemist-adversary` subagent. Pass it the following prompt (verbatim — DO NOT summarise, the GROUND TRUTH anchor is load-bearing):
+Use the `Agent` (Task) tool to spawn the `orchemist-adversary` subagent **with `model: "opus"`** (per [[feedback_max_effort_adversary_reviewer]] — the adversary is a critical quality gate and warrants max-effort reasoning). Pass it the following prompt (verbatim — DO NOT summarise, the GROUND TRUTH anchor is load-bearing):
 
 ---
 
