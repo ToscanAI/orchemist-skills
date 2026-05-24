@@ -40,6 +40,12 @@ The orchestrator parses the issue file, creates a run directory at `<repo>/.orch
 
 If you want the full engine experience (web UI, queue, multi-provider model selection, daemon mode, history dashboards), see the main repo: <https://github.com/ToscanAI/orchemist>.
 
+## What's next
+
+The skills pack is **Track A** of the 2026-05-21 pivot — it ships the coding pipeline to anyone already using Claude Code. **Track B** is the engine-side dialogue phase ([PR #808](https://github.com/ToscanAI/orchemist/pull/808)), which adds a cross-model reviewer (Claude drafter ↔ Gemini reviewer) for the full trust-engine wedge.
+
+The web surface that operates both tracks at scale is the **Orchemist Harness Redesign**, tracked as epic [ToscanAI/orchemist#810](https://github.com/ToscanAI/orchemist/issues/810). The investigation pack with vision, mockups, and the duplicate-function audit lives at [`docs/harness-redesign-2026-05-24/`](https://github.com/ToscanAI/orchemist/tree/main/docs/harness-redesign-2026-05-24) in the engine repo.
+
 ## Versioning
 
 The pipeline YAML's structural revisions are tracked in [`CHANGELOG.md`](CHANGELOG.md). Current pipeline structure: **v4.2** (Phase 0 existing-symbols inventory + four-verdict schema CONSUME / EXTEND / DIVERGENT / NEW-OK, 2026-05-24). The skills-pack distribution version (`package.json`) tracks separately.
