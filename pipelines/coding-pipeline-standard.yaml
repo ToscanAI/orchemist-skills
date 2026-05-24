@@ -70,6 +70,10 @@ config_schema:
       type: string
       default: ""
       description: "Sub-check 7d inventory inputs. Newline-separated glob patterns pointing at workspace package barrels — e.g. `packages/*/src/index.ts`, `pkg/*/index.go`. Phase 0 enumerates the exported symbols so SPEC + IMPLEMENT consume cross-package symbols (saveResponse, loadResponses, computeProgressPercent, etc.) rather than duplicating."
+    phase0_hard_gate:
+      type: boolean
+      default: false
+      description: "POLICY FLAG (added v4.2, 2026-05-24). When false (default), Phase 0 degrades gracefully: if the existing_symbols_inventory phase exhausts retries or fails, the orchestrator falls through to SPEC with an empty/partial `existing_symbols.md` (downstream phases revert to ad-hoc grep per the v4 backward-compat short-circuit). When true, consumers signal stricter intent: SPEC + SPEC_ADVERSARY + IMPLEMENT prompts elevate the absence of a valid `existing_symbols.md` to a [BLOCKER]; the orchestrator should HALT rather than fall through. The YAML's default `transitions.exhausted: spec` honors graceful degradation; consumers who want true HALT can fork-override `transitions.exhausted: null` (terminate the run) or use the wrapper-orchestrator pattern documented in CHANGELOG v4.2. Motivation: Wave 5/6 redundancy retro in ToscanAI/value-investing (2026-05-24) measured 32 PRs / 19 days producing 13 new duplication groups — late-catch under graceful degradation is the dominant failure mode for that consumer."
 
 example_input:
   issue_title: "Sample issue title"
@@ -91,6 +95,23 @@ phases:
   # consecutive feature PRs each shipped a 7d-duplication-then-fix cycle —
   # one via post-impl refactor (~1hr cost), one via re-spec round. The catch
   # was consistently LATE — after authoring had begun.
+  #
+  # Strengthened v4.2 (2026-05-24) — Wave 5/6 retro data from the
+  # ToscanAI/value-investing consumer. Empirical measurement:
+  #
+  #   Period         Days  PRs merged  New dup groups
+  #   05-04 → 05-16  12    24 PRs      7 (Wave 5: N5-1..N5-7)
+  #   05-16 → 05-23  7     8 PRs       6 (Wave 6: C1, C2, C4-C7)
+  #   total          19    32 PRs      13
+  #
+  # The pre-v4 mode (Phase 0 absent, sub-check 7d caught only at REVIEW)
+  # produced ~1 dup group per 2.5 PRs across both project epics
+  # (EPIC-16 hi-fi UI sweep + EPIC-10 dashboard). Phase 0 (v4) moves catch
+  # from REVIEW → SPEC; v4.2 adds the EXTEND verdict (below) to name the
+  # "parameterize existing helper to share both call sites" pattern that
+  # was previously implicit under "consume" and frequently missed when
+  # the existing helper had a slightly narrower signature than the new
+  # use site needed.
   #
   # Phase 0 fixes this by producing a sticky `{output_dir}/existing_symbols.md`
   # inventory BEFORE Phase 1a SPEC. Every subsequent phase (spec, behavioral,
@@ -203,13 +224,26 @@ phases:
 
       ## 5. Consume-vs-author guidance (sub-check 7d enforcement)
 
-      Per sub-check 7d (HARD RULE in IMPLEMENT phase): before authoring ANY new symbol that overlaps with sections 1-4 above, downstream agents MUST:
-      1. Consume the existing symbol (preferred — import or extend).
-      2. If consume-impossible (e.g. cross-package boundary not in scope), return BLOCKED with: `BLOCKED: 7d-duplication — <new-symbol> duplicates <existing path:line>; consolidating needs <shared module> not in the spec; recommend spec amendment.`
+      Per sub-check 7d (HARD RULE in IMPLEMENT phase): before authoring ANY new symbol that overlaps with sections 1-4 above, downstream agents MUST pick exactly one of four verdicts per overlap:
 
-      A near-equivalent that has a contract-required difference (different sort order, different precision, different sealed string) is NOT duplication — but the spec MUST include a `## Divergence justification` subsection naming the existing symbol and the contract-required difference.
+      1. **CONSUME** (preferred) — import the existing symbol byte-identical, no signature change. SPEC's Files-to-Modify lists the import-add at the call site; nothing else changes.
+      2. **EXTEND** (added v4.2, 2026-05-24) — parameterize the existing symbol (add an options arg / safe-superset wrapper / accept a path or callback) so the existing call site AND the new call site both consume the same source. The existing symbol moves nowhere; its contract widens. SPEC's Files-to-Modify describes the parameterization in Implementation Steps; SPEC's Files-to-Create lists nothing new. Use when CONSUME is "almost" but the new use site needs one more arg / one slightly different code path. This was the dominant Wave 5/6 pattern in ToscanAI/value-investing: N5-1 took a private fixture loader and added a `fixturePath` parameter so 5 panel modules shared it instead of inlining 5 copies of the 16-field AnnualFacts builder.
+      3. **DIVERGENT** — a near-equivalent that has a contract-required difference (different sort order, different precision, different sealed string). NOT duplication — but the spec MUST include a `## Divergence justification` subsection naming the existing symbol and the contract-required difference. SPEC's Files-to-Create lists the new symbol with a clear divergence rationale.
+      4. **BLOCKED** — if consume / extend are both impossible (e.g. cross-package boundary not in scope, the existing copy is test-scope but you need prod-scope), return: `BLOCKED: 7d-duplication — <new-symbol> duplicates <existing path:line>; consolidating needs <shared module> not in the spec; recommend spec amendment.` Route back to the orchestrator for a scope decision.
+
+      Verdict labels (CONSUME / EXTEND / DIVERGENT / BLOCKED) appear in §6 below + are quoted verbatim by SPEC + SPEC_ADVERSARY + REVIEW for stable cross-phase tracking.
 
       ## 6. SPEC's proposed new symbols (filled in by Phase 1a SPEC; cross-checked at every subsequent phase)
+
+      Each entry uses this format so verdicts are scannable:
+
+      ```
+      - **<symbol-name>** (verdict: CONSUME | EXTEND | DIVERGENT | NEW-OK)
+        Existing: <path:line or "(none — genuinely new)">
+        Rationale: <one line>
+      ```
+
+      NEW-OK = genuinely new; no overlap with sections 1-4. Use only when grep returned zero plausibly-related symbols.
 
       <initially empty; SPEC adds entries as it authors new files/symbols>
       ```
@@ -258,13 +292,16 @@ phases:
 
       ## Existing-symbols inventory (Phase 0 artifact — sub-check 7d sticky reference)
 
-      Read `{output_dir}/existing_symbols.md` BEFORE proposing any new file/symbol/component. Sections 1-4 enumerate the project's UI primitives, shared libraries, adjacent action/hook patterns, and workspace barrels available for consumption. For EVERY new symbol your spec proposes (in §B.3 Files-to-Create or §B.2 Files-to-Modify), do one of:
+      Read `{output_dir}/existing_symbols.md` BEFORE proposing any new file/symbol/component. Sections 1-4 enumerate the project's UI primitives, shared libraries, adjacent action/hook patterns, and workspace barrels available for consumption. For EVERY new symbol your spec proposes (in §B.3 Files-to-Create or §B.2 Files-to-Modify), assign exactly ONE of four verdicts (per §5 in existing_symbols.md):
 
-      1. **Consume the existing symbol** (preferred) — cite the existing entry in your spec.md (e.g. "uses `Dialog` from `packages/ui/src/components/dialog.tsx`").
-      2. **Document a Divergence justification** — if the existing symbol has a contract-required difference (different sort order, different sealed string, different precision), add a `## Divergence justification` subsection naming the existing symbol + the contract-required reason.
-      3. **Append the new symbol to inventory §6** — after you propose a genuinely new symbol (no existing equivalent), append an entry to existing_symbols.md §6 ("SPEC's proposed new symbols") so Phase 1b BEHAVIORAL + every subsequent phase has a stable reference.
+      1. **CONSUME** (preferred) — import the existing symbol byte-identical. Cite the existing entry in your spec.md (e.g. "uses `Dialog` from `packages/ui/src/components/dialog.tsx`"). Files-to-Modify lists the import-add at the call site.
+      2. **EXTEND** (v4.2) — parameterize the existing symbol so the existing call site AND the new call site both consume the same source. Document the parameterization (added arg / options object / safe-superset wrapper) in Implementation Steps. Files-to-Create lists NOTHING new; the existing symbol's contract widens. Use when CONSUME is "almost" but the new use site needs one more arg / one slightly different code path. EXTEND is the right verdict in ~40% of v4 wave-5/6 redundancy retro cases (ToscanAI/value-investing data; was previously masked under "consume").
+      3. **DIVERGENT** — near-equivalent with a contract-required difference (different sort order, different sealed string, different precision). Add a `## Divergence justification` subsection naming the existing symbol + the contract-required reason. Files-to-Create lists the new symbol explicitly.
+      4. **NEW-OK** — genuinely new; no overlap with sections 1-4. Files-to-Create lists the new symbol. Use only when grep returned zero plausibly-related symbols.
 
-      A new symbol that overlaps with sections 1-4 WITHOUT either consumption or a Divergence justification will be flagged `[divergence]` at SPEC_ADVERSARY (R1 cost: re-spec round) and `[MAJOR][correctness]` at REVIEW (Phase 8 cost: refactor commit). The early catch via existing_symbols.md saves the round-trip.
+      **Append every proposed new symbol** to inventory §6 ("SPEC's proposed new symbols") with the verdict (CONSUME / EXTEND / DIVERGENT / NEW-OK) so Phase 1b BEHAVIORAL + every subsequent phase has a stable reference.
+
+      A new symbol that overlaps with sections 1-4 WITHOUT one of the four explicit verdicts will be flagged `[divergence]` at SPEC_ADVERSARY (R1 cost: re-spec round) and `[MAJOR][correctness]` at REVIEW (Phase 8 cost: refactor commit). The early catch via existing_symbols.md saves the round-trip.
 
       ## Previous Work
       {phase_summary}
@@ -462,7 +499,14 @@ phases:
       ### 7d — Re-implementation of an existing symbol (spec-level smell)
       If the spec proposes authoring a new helper, loader, formatter, type, component, hook, or utility that duplicates an existing symbol in the codebase, flag `[divergence]`. The IMPLEMENT phase has its own 7d HARD RULE that returns BLOCKED on duplication; catching the proposal at SPEC stage saves a full pipeline round.
 
-      **Sticky 7d enforcement (v4 — Phase-0 existing-symbols inventory):** read `{output_dir}/existing_symbols.md` and cross-check every symbol the spec proposes against inventory sections 1-4 (UI primitives, shared libraries, adjacent actions/hooks, workspace barrels). The spec MUST either (a) cite the existing entry (consume), OR (b) include a `## Divergence justification` subsection naming the existing symbol + the contract-required difference, OR (c) have appended the new symbol to inventory §6 ("SPEC's proposed new symbols") with the existing entry it overlaps with explicitly named "not applicable" with rationale. Any proposed-new symbol that overlaps with sections 1-4 WITHOUT one of (a)/(b)/(c) is `[divergence]` with the specific inventory-entry pointer.
+      **Sticky 7d enforcement (v4 — Phase-0 existing-symbols inventory; v4.2 verdict labels):** read `{output_dir}/existing_symbols.md` and cross-check every symbol the spec proposes against inventory sections 1-4 (UI primitives, shared libraries, adjacent actions/hooks, workspace barrels). The spec MUST assign exactly ONE of four verdicts per proposed symbol (per inventory §5):
+
+      - **CONSUME** — Files-to-Modify cites the existing entry; no new symbol created. Cross-check: the import is concrete (named import; not a re-namespacing).
+      - **EXTEND** (v4.2) — Files-to-Modify describes the parameterization (added arg / options object / safe-superset wrapper) of the existing symbol so it accommodates the new call site. Cross-check: Files-to-Create is empty for this concept; Implementation Steps names the new arg and how the existing call site (now also passing the same arg explicitly OR defaulting) stays byte-equivalent. EXTEND-without-Files-to-Create-empty is a `[divergence]` finding — if the spec ALSO creates a new symbol while claiming EXTEND, the verdict label doesn't match the spec content.
+      - **DIVERGENT** — spec has a `## Divergence justification` subsection naming the existing symbol + the contract-required difference. Cross-check: justification is concrete (cites a sealed string / sort order / precision / type narrowing), not just "different use case".
+      - **NEW-OK** — genuinely new; inventory §6 entry explicitly records "(none found)" with rationale.
+
+      Any proposed-new symbol that overlaps with sections 1-4 WITHOUT one of the four explicit verdicts is `[divergence]` with the specific inventory-entry pointer. Verdict label mismatch (e.g. EXTEND claimed but Files-to-Create lists a new file) is `[divergence]` with `[verdict-mismatch]` qualifier.
 
       Search targets (adapt per project — these are the canonical scan paths): the project's UI primitive package(s); `lib/`, `utils/`, `_shared/` directories; sibling files in the same directory (across language extensions — `.ts`, `.js`, `.py`, `.go` — pick the relevant ones); cross-package symbols accessible via workspace boundaries.
 
