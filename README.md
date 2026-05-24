@@ -40,4 +40,8 @@ The orchestrator parses the issue file, creates a run directory at `<repo>/.orch
 
 If you want the full engine experience (web UI, queue, multi-provider model selection, daemon mode, history dashboards), see the main repo: <https://github.com/ToscanAI/orchemist>.
 
+## Versioning
+
+The pipeline YAML's structural revisions are tracked in [`CHANGELOG.md`](CHANGELOG.md). Current pipeline structure: **v4.2** (Phase 0 existing-symbols inventory + four-verdict schema CONSUME / EXTEND / DIVERGENT / NEW-OK, 2026-05-24). The skills-pack distribution version (`package.json`) tracks separately.
+
 License: MIT. See `LICENSE`.
