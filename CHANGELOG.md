@@ -4,6 +4,30 @@ All notable changes to the orchemist-skills pack are recorded here. The pipeline
 
 This changelog uses [Semantic Versioning](https://semver.org/) for the pipeline YAML version field.
 
+## [4.3.0] — 2026-05-26
+
+### Added — producer-side 7d enforcement family (closes [#6](https://github.com/ToscanAI/orchemist-skills/issues/6))
+
+- **`### 7e` sub-check in SPEC_ADVERSARY** — intra-symbol duplication audit (producer-side complement to 7d). Catches the case where a newly-created exported symbol's body contains byte-identical sub-blocks (e.g. identical SQL projections across a fixture-stub short-circuit). Two acceptable resolutions: (a) factor the duplicate sub-block into a private helper; (b) document a per-branch divergence justification in §B.5.x with the same concreteness bar as 7d (sealed string / sort order / precision / type narrowing / environment boundary — not bare "different use case").
+- **`### HARD RULE — 7e-implement` in IMPLEMENT** — implementer self-check before file output. Inspects each `return` / `throw` arm of newly-created exported functions for byte-identical-modulo-whitespace duplicates; refactors to a private helper inline OR returns `BLOCKED: 7e-intra-symbol-duplication`. Sibling of the existing 7d HARD RULE.
+- **`### HARD RULE — §7.2 byte-identical added-block diff lint` in IMPLEMENT** — pure static grep at post-commit, pre-push. Surfaces multi-line byte-identical added blocks across the diff via `git diff main...HEAD | grep '^+' | sort | uniq -c | awk '$1 >= 2 && length($0) > 50'`; contiguous-3-line gate FAILS the lint and routes to inline refactor OR `BLOCKED: 7e-seal-diff-lint`. Non-LLM lint; tunable thresholds. Inserted as IMPLEMENT task step 8, between commit and push.
+- **`### §3a` sub-section in Phase 0 inventory** — pre-existing dual-path helpers inventory via regex heuristic (`grep -B 8 "return [^;]*;" <file> | grep "if ("`). SPEC reads this list and considers EXTEND-ing an existing multi-branch helper before authoring a new one. Acknowledged false-positive rate; consumer is human-in-the-loop. EXTEND verdict in §5 now explicitly references §3a.
+- **`Sub-check 7d-producer` in REVIEW** — intra-symbol return-arm comparison (pragmatic verbatim-quote form, not normalized-hash α-conversion per audit R1 downgrade). Quotes each arm verbatim in `review.md`, asserts ≥1 non-whitespace-non-identifier token differs; SPEC §B.5.x divergence justification short-circuits the comparison (and the §B.5.x justification itself must meet the 7d concreteness bar).
+- **Regression test scaffold** — `tests/test_spec_adversary_7e_intra_symbol.py` + `tests/fixtures/spec-with-intra-duplication.md` (reconstructed value-investing#449 fixture) + minimal `pyproject.toml` + `tests/conftest.py` + `tests/README.md`. Prompt-rendering-only assertions (no live Opus call per CI-cost note). Manual integration-reproduction protocol documented in `tests/README.md`.
+
+### Motivation — value-investing Wave 7 audit (2026-05-26)
+
+ToscanAI/value-investing#449 (lift commit `11db4eb`) shipped `findCompanyByTicker` with two byte-identical `await db<…>` SQL blocks separated by a fixture-stub short-circuit. The PR's 7d enumeration listed callers of a pre-existing symbol (`loadAnnualFactsFromDb`) and APPROVED — the new symbol's own intra-file duplication was never inspected. 7d's caller-enumeration audit is import-side reuse; this issue's 7e family is producer-side intra-symbol duplication. The two are complementary defense-in-depth layers, not redundancy.
+
+Five-phase defense in depth (SPEC_ADVERSARY 7e ⇒ Phase 0 §3a EXTEND hint ⇒ IMPLEMENT 7e-implement ⇒ IMPLEMENT §7.2 diff lint ⇒ REVIEW 7d-producer) gives the producer-side smell the same multi-layer treatment 7d-consumer received in v4.x.
+
+### Notes
+
+- Follow-up issue for the retro-loop process operationalization (audit R1 deferred Improvement 4) — filed separately; see PR body for link. The follow-up names concrete cadence, owner, and output format.
+- All five sub-checks are ADDITIVE; existing 7d enforcement language is unchanged byte-for-byte. No breaking change to consumers; consumer pipelines that don't trigger the new producer-side patterns see no behavioral change.
+- Structural-pipeline version line bumped from `4.2.0` → `4.3.0` (minor — additive sub-checks). The `version` field in `pipelines/coding-pipeline-standard.yaml` (distribution-layer) is unchanged at `"2.0.0"` per the two-axis version scheme.
+- Skip-spec pipeline (`pipelines/coding-pipeline-skip-spec.yaml`) is NOT touched in this release — by design, skip-spec assumes the consumer pre-places SPEC + behavioral and accepts duplication responsibility upstream.
+
 ## [4.2.0] — 2026-05-24
 
 ### Added

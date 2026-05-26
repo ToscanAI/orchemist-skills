@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orchemist-skills"
+version = "0.1.0"
+description = "Orchemist Claude Code skills pack — pipelines + skills + agents"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pyyaml>=6", "pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
