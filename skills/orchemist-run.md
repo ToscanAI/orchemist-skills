@@ -32,6 +32,8 @@ The `opus` override on `spec_adversary` and `review` reflects [[feedback_max_eff
 
 **Phase 0 (`existing_symbols_inventory`) MUST use `general-purpose`** — its prompt template instructs the subagent to write `{{output_dir}}/existing_symbols.md` to disk, and read-only subagent types (notably Claude Code's `Explore`, which has no Write/Edit tool) cannot satisfy that contract and silently break the file-write invariant every downstream phase depends on. See `skills/orchemist-existing-symbols-inventory.md` for the full prompt and the safe-default fallback. Field report: ToscanAI/orchemist-skills#9; upstream contract documented at ToscanAI/orchemist#903.
 
+**Skill slug convention:** the orchestrator's `/orchemist:<phase.id>` invocation transforms underscores in `phase.id` to hyphens in the skill slug. Examples: `phase.id` `existing_symbols_inventory` → skill `/orchemist:existing-symbols-inventory`; `phase.id` `spec_adversary` → skill `/orchemist:spec-adversary`; `phase.id` `acceptance_test` → skill `/orchemist:acceptance-test`. Skill files in `skills/` use the hyphenated form (e.g. `orchemist-existing-symbols-inventory.md`).
+
 If the `Agent` tool is unavailable, the run FAILS — there is no inline fallback. The fresh-context-window property is load-bearing: drafter context must not leak into a downstream evaluator (adversary, reviewer) or a fresh-eye implementer/fix round.
 
 This policy applies to revision rounds too: each retry of a phase is a fresh subagent, not a continuation of the prior round's context. Phase skills render `{{iteration_history}}` and `{{phase_diff}}` from disk so the new subagent sees prior rounds as input data, not as inherited reasoning.

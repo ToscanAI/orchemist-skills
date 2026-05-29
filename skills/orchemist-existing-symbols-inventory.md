@@ -100,7 +100,7 @@ For every helper in §2 (project shared libraries) whose body contains a multi-b
 Per sub-check 7d (HARD RULE in IMPLEMENT phase): before authoring ANY new symbol that overlaps with sections 1-4 above, downstream agents MUST pick exactly one of four verdicts per overlap:
 
 1. **CONSUME** (preferred) — import the existing symbol byte-identical, no signature change. SPEC's Files-to-Modify lists the import-add at the call site; nothing else changes.
-2. **EXTEND** (added v4.2, 2026-05-24; §3a wired in v4.3, 2026-05-26) — parameterize the existing symbol (add an options arg / safe-superset wrapper / accept a path or callback) so the existing call site AND the new call site both consume the same source. The existing symbol moves nowhere; its contract widens. SPEC's Files-to-Modify describes the parameterization in Implementation Steps; SPEC's Files-to-Create lists nothing new. Use when CONSUME is "almost" but the new use site needs one more arg / one slightly different code path. **Includes EXTEND-ing an existing dual-path helper surfaced in §3a** — when the new use site needs the same multi-branch shape an existing helper already implements (e.g. fixture short-circuit + production fallback), prefer EXTEND over authoring a new dual-path helper that would itself trigger the 7e intra-symbol duplication audit downstream.
+2. **EXTEND** (added v4.2, 2026-05-24; §3a wired in v4.3, 2026-05-26) — parameterize the existing symbol (add an options arg / safe-superset wrapper / accept a path or callback) so the existing call site AND the new call site both consume the same source. The existing symbol moves nowhere; its contract widens. SPEC's Files-to-Modify describes the parameterization in Implementation Steps; SPEC's Files-to-Create lists nothing new. Use when CONSUME is "almost" but the new use site needs one more arg / one slightly different code path. This was the dominant Wave 5/6 pattern in ToscanAI/value-investing: N5-1 took a private fixture loader and added a `fixturePath` parameter so 5 panel modules shared it instead of inlining 5 copies of the 16-field AnnualFacts builder. **Includes EXTEND-ing an existing dual-path helper surfaced in §3a** — when the new use site needs the same multi-branch shape an existing helper already implements (e.g. fixture short-circuit + production fallback), prefer EXTEND over authoring a new dual-path helper that would itself trigger the 7e intra-symbol duplication audit downstream.
 3. **DIVERGENT** — a near-equivalent that has a contract-required difference (different sort order, different precision, different sealed string). NOT duplication — but the spec MUST include a `## Divergence justification` subsection naming the existing symbol and the contract-required difference. SPEC's Files-to-Create lists the new symbol with a clear divergence rationale.
 4. **BLOCKED** — if consume / extend are both impossible (e.g. cross-package boundary not in scope, the existing copy is test-scope but you need prod-scope), return: `BLOCKED: 7d-duplication — <new-symbol> duplicates <existing path:line>; consolidating needs <shared module> not in the spec; recommend spec amendment.` Route back to the orchestrator for a scope decision.
 
@@ -151,7 +151,7 @@ After the subagent returns:
 
      <paste the subagent's 3-line summary here for the orchestrator's run log>
 
-     success
+     VERDICT: success
      ```
 
    - **Failure case** — if `existing_symbols.md` is missing OR empty OR the subagent's response is malformed, write to `{{output_dir}}/existing_symbols_inventory.md`:
@@ -159,7 +159,7 @@ After the subagent returns:
      ```
      Phase 0 (existing_symbols_inventory) failed — inventory not written or malformed.
 
-     failed
+     VERDICT: failed
      ```
 
      ALSO write a minimal stub to `{{output_dir}}/existing_symbols.md` so downstream phases (which read this file unconditionally) get the graceful-degradation empty-sections fallback:
