@@ -1,6 +1,6 @@
 ---
 name: orchemist:run
-description: Orchestrator for the Orchemist coding pipeline. Drives the YAML state machine (spec, behavioral, adversary, acceptance_test, implement, acceptance_run, review, fix, test) phase-by-phase, persists state, and handles success/failed/timeout/exhausted transitions. Triggers when the user invokes /orchemist:run or asks to run the Orchemist pipeline on an issue.
+description: Orchestrator for the Orchemist coding pipeline. Drives the YAML state machine (existing_symbols_inventory, spec, behavioral, adversary, acceptance_test, implement, acceptance_run, review, fix, test) phase-by-phase, persists state, and handles success/failed/timeout/exhausted transitions. Triggers when the user invokes /orchemist:run or asks to run the Orchemist pipeline on an issue.
 ---
 
 # Orchemist pipeline orchestrator
@@ -15,19 +15,24 @@ Every LLM-driven phase in the pipeline MUST run as a fresh subagent invoked via 
 
 Per-phase subagent + model mapping:
 
-| Phase            | Subagent type         | Model override |
-|------------------|-----------------------|----------------|
-| `spec`           | general-purpose       | (default)      |
-| `behavioral`     | general-purpose       | (default)      |
-| `spec_adversary` | orchemist-adversary   | `opus`         |
-| `acceptance_test`| orchemist-tester      | (default)      |
-| `implement`      | orchemist-implementer | (default)      |
-| `review`         | general-purpose       | `opus`         |
-| `fix`            | general-purpose       | (default)      |
-| `acceptance_run` | (no LLM — command)    | n/a            |
-| `test`           | (no LLM — command)    | n/a            |
+| Phase                          | Subagent type         | Model override |
+|--------------------------------|-----------------------|----------------|
+| `existing_symbols_inventory`   | general-purpose       | (default)      |
+| `spec`                         | general-purpose       | (default)      |
+| `behavioral`                   | general-purpose       | (default)      |
+| `spec_adversary`               | orchemist-adversary   | `opus`         |
+| `acceptance_test`              | orchemist-tester      | (default)      |
+| `implement`                    | orchemist-implementer | (default)      |
+| `review`                       | general-purpose       | `opus`         |
+| `fix`                          | general-purpose       | (default)      |
+| `acceptance_run`               | (no LLM — command)    | n/a            |
+| `test`                         | (no LLM — command)    | n/a            |
 
 The `opus` override on `spec_adversary` and `review` reflects [[feedback_max_effort_adversary_reviewer]] — these are the critical quality gates.
+
+**Phase 0 (`existing_symbols_inventory`) MUST use `general-purpose`** — its prompt template instructs the subagent to write `{{output_dir}}/existing_symbols.md` to disk, and read-only subagent types (notably Claude Code's `Explore`, which has no Write/Edit tool) cannot satisfy that contract and silently break the file-write invariant every downstream phase depends on. See `skills/orchemist-existing-symbols-inventory.md` for the full prompt and the safe-default fallback. Field report: ToscanAI/orchemist-skills#9; upstream contract documented at ToscanAI/orchemist#903.
+
+**Skill slug convention:** the orchestrator's `/orchemist:<phase.id>` invocation transforms underscores in `phase.id` to hyphens in the skill slug. Examples following the rule: `phase.id` `existing_symbols_inventory` → skill `/orchemist:existing-symbols-inventory`; `phase.id` `acceptance_test` → skill `/orchemist:acceptance-test`; `phase.id` `acceptance_run` → skill `/orchemist:acceptance-run`. Skill files in `skills/` use the hyphenated form (e.g. `orchemist-existing-symbols-inventory.md`). **Exception:** `phase.id` `spec_adversary` invokes skill `/orchemist:adversary` (file `orchemist-adversary.md`) — the `spec_` prefix is dropped because the adversary skill is shared infrastructure intended to serve future adversarial phases (e.g. an eventual `test_adversary`) without renaming.
 
 If the `Agent` tool is unavailable, the run FAILS — there is no inline fallback. The fresh-context-window property is load-bearing: drafter context must not leak into a downstream evaluator (adversary, reviewer) or a fresh-eye implementer/fix round.
 
