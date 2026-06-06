@@ -1042,7 +1042,7 @@ phases:
 
            BLOCKED: 7e-seal-diff-lint — <file>:<line-A>..<line-B> and <file>:<line-C>..<line-D> are byte-identical <N>-line blocks; consolidation would change the SPEC §B.4 step structure; recommend SPEC amendment.
 
-      - **Single-line candidates** (boilerplate `};` closers, common import statements, framework-generated stubs, copyright headers, `# noqa` comments): record them in `{output_dir}/implement.md` under a `## §7.2 diff lint candidates (single-line, accepted)` heading with a one-line rationale per candidate, then proceed to push. These do NOT fail the lint; the rationale exists for REVIEWER transparency.
+      - **Single-line candidates** (boilerplate `}};` closers, common import statements, framework-generated stubs, copyright headers, `# noqa` comments): record them in `{output_dir}/implement.md` under a `## §7.2 diff lint candidates (single-line, accepted)` heading with a one-line rationale per candidate, then proceed to push. These do NOT fail the lint; the rationale exists for REVIEWER transparency.
 
       The lint is a pure static grep — no LLM round-trip — and runs at the IMPLEMENT/push boundary so REVIEWER receives a diff with all multi-line duplicate-block candidates resolved or audit-locked. Threshold parameters (`length($0) > 50`, `$1 >= 2`, contiguous-3-line gate) are intentionally tunable; the defaults are calibrated against the value-investing#449 motivating case (two 5-line `await db<…>` blocks at >70 characters each).
 
