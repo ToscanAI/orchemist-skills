@@ -67,6 +67,8 @@ Default pipeline: `~/.claude/skills/orchemist/pipelines/coding-pipeline-standard
 
 If the user passes `--skip-spec`, use `~/.claude/skills/orchemist/pipelines/coding-pipeline-skip-spec.yaml` (or repo-local `pipelines/coding-pipeline-skip-spec.yaml`) instead. **Pre-condition:** the user must pre-place `spec.md` and `behavioral.md` in `<repo_path>/.orchemist/runs/<run-id>/` BEFORE invoking the orchestrator. To resume an existing run with pre-written files, also pass `--resume <run-id>` so the orchestrator does not generate a new run-id and overwrite the pre-placed files.
 
+If the user passes `--maintenance` (or `--fix`), use `~/.claude/skills/orchemist/pipelines/coding-pipeline-maintenance.yaml` (or repo-local `pipelines/coding-pipeline-maintenance.yaml`). This is the **right-sized pipeline for bug fixes, infra/deploy/CI changes, and small maintenance work**: `recon → spec → spec_adversary(opus) → implement → review(opus) → test(suite) → PR`. It deliberately **SKIPS** the behavioral contract + the sealed-acceptance trio (`acceptance_test → test_adversary → acceptance_run`) — maintenance/infra behaviour is validated by a FOCUSED unit/e2e test (when locally testable) or by **PROD VALIDATION** (deploy + observe, when the behaviour is deploy-time/cloud-side and not locally sealable). It reuses the standard phase IDs, so the per-phase subagent+model mapping above applies unchanged. After the `test` phase the orchestrator opens the PR (Closes #N) + auto-merges, then performs the prod-validation step. Use `coding-pipeline-standard` instead when the change is a NEW feature with a real, locally-sealable behavioral contract.
+
 ## Run state directory
 
 For each invocation, generate a run ID:
