@@ -116,6 +116,7 @@ phases:
       This file contains ONLY the behavioral contracts — what the system should do.
       You have no access to implementation details. This is by design.
 
+      <!-- ADVERSARY_FEEDBACK_INTEGRATION_BEGIN -->
       ## Adversary Feedback Integration
       If adversary findings exist in the Previous Work above:
       - Read the EXISTING test file at `{output_dir}/acceptance_tests.py` first
@@ -125,7 +126,8 @@ phases:
       - Preserve all test function names, class structure, and passing assertions
       - Add new tests ONLY if the adversary flagged a COVERAGE gap
       If this is round 1 (no adversary findings above), write the test file from scratch.
-
+      <!-- ADVERSARY_FEEDBACK_INTEGRATION_END -->
+      <!-- MULTI_LANG_BEGIN -->
       ## Task
       1. Read the behavioral contracts carefully
       2. Write a Python test file `{output_dir}/acceptance_tests.py` that:
@@ -156,6 +158,7 @@ phases:
            "note": "Tests written pre-implementation. Run after implement phase."
          }}
          ```
+      <!-- MULTI_LANG_END -->
 
       ## Output
       Write a summary to {output_dir}/acceptance_test.md:
@@ -644,6 +647,7 @@ phases:
 
       Read the code review at: {output_dir}/review.md
       Read the original spec at: {output_dir}/spec.md
+      Read the existing-symbols inventory at: `{output_dir}/existing_symbols.md` (Phase-0 sticky reference; sub-check 7d applies to FIX too — any fix that introduces a NEW symbol overlapping inventory §1-4 is the same 7d violation IMPLEMENT would have raised BLOCKED on. Read §1-4 + §6 BEFORE authoring any new symbol while addressing review findings; if a fix requires duplication, write a `BLOCKED: 7d-duplication — <new-symbol> duplicates <existing path:line>` line to `{output_dir}/fix.md` instead of authoring the duplicate. Skip this rule if `existing_symbols.md` is absent or all sections are empty stubs — fall back to ad-hoc grep against the standard targets.)
 
       ## ANTI-TAMPERING — ENGINE-ENFORCED
       The acceptance test file at `{output_dir}/acceptance_tests.py` is sealed.
