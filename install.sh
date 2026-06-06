@@ -1,16 +1,27 @@
 #!/usr/bin/env bash
 # install.sh — Orchemist Skills Pack installer
 #
-# Idempotent installer: copies skills/*.md to ~/.claude/skills/
+# Idempotent installer: copies skills/*.md to ~/.claude/skills/<name>/SKILL.md
 # and agents/*.md to ~/.claude/agents/. Backs up any existing files
 # to <name>.bak.<timestamp> before overwrite. Running twice is safe:
 # the second run produces identical state.
 #
 # Usage:
 #   ./install.sh            # install into ~/.claude/
+#   ./install.sh --check    # dry-run: verify install is in sync, write nothing
 #   CLAUDE_HOME=/tmp/c ./install.sh   # install into a custom location
 
 set -euo pipefail
+
+# ── Parse args (BEFORE pre-flight so an unknown flag deterministically exits 2,
+#    regardless of cwd or whether source dirs exist — a usage error must not be
+#    masked by a pre-flight exit 1). Use ${1:-} for set -u safety. ─────────────
+CHECK_ONLY=0
+case "${1:-}" in
+  --check) CHECK_ONLY=1 ;;
+  "")      CHECK_ONLY=0 ;;
+  *)       echo "usage: $0 [--check]" >&2; exit 2 ;;
+esac
 
 # ── Locate repo root (directory of this script) ──────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,9 +49,14 @@ if [ ! -d "$PIPELINES_SRC" ]; then
   exit 1
 fi
 
-mkdir -p "$SKILLS_DST" "$AGENTS_DST" "$PIPELINES_DST"
+if [ "$CHECK_ONLY" -eq 0 ]; then
+  mkdir -p "$SKILLS_DST" "$AGENTS_DST" "$PIPELINES_DST"
+fi
 
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+
+# ── Drift accumulator (used in --check mode only) ─────────────────────────────
+MISMATCH_COUNT=0
 
 # ── install_file SRC DST ──────────────────────────────────────────────────────
 # Copies SRC -> DST. If DST exists and is byte-identical to SRC, skip silently.
@@ -48,6 +64,28 @@ TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 install_file() {
   local src="$1"
   local dst="$2"
+
+  # ── --check (dry-run): read-only compare, NEVER write, ALWAYS return 0. ──────
+  # Discrepancies are recorded by incrementing MISMATCH_COUNT (data, not a
+  # return code) so a single run reports ALL drift without set -e aborting on
+  # the first one. cmp -s legitimately returns non-zero on a content diff; it is
+  # captured inside the if and must not propagate. The increment uses
+  # $((x+1)) (not ((x++)), which returns non-zero when x is 0 and would trip
+  # set -e).
+  if [ "$CHECK_ONLY" -eq 1 ]; then
+    if [ ! -f "$dst" ]; then
+      echo "  MISSING: $dst"
+      MISMATCH_COUNT=$((MISMATCH_COUNT + 1))
+    elif cmp -s "$src" "$dst"; then
+      echo "  OK: $dst"
+    else
+      echo "  MISMATCH: $dst"
+      MISMATCH_COUNT=$((MISMATCH_COUNT + 1))
+    fi
+    return 0
+  fi
+
+  # ── install mode: copy SRC -> DST, backing up a differing DST first. ─────────
   if [ -f "$dst" ]; then
     if cmp -s "$src" "$dst"; then
       echo "  unchanged: $dst"
@@ -66,8 +104,11 @@ echo "Installing Orchemist skills to $SKILLS_DST"
 SKILL_COUNT=0
 for src in "$SKILLS_SRC"/*.md; do
   [ -f "$src" ] || continue
-  fname="$(basename "$src")"
-  install_file "$src" "$SKILLS_DST/$fname"
+  name="$(basename "$src" .md)"          # strip .md → slug, e.g. orchemist-run
+  if [ "$CHECK_ONLY" -eq 0 ]; then
+    mkdir -p "$SKILLS_DST/$name"         # ensure ~/.claude/skills/<slug>/ exists (install mode only)
+  fi
+  install_file "$src" "$SKILLS_DST/$name/SKILL.md"
   SKILL_COUNT=$((SKILL_COUNT + 1))
 done
 
@@ -94,6 +135,17 @@ for src in "$PIPELINES_SRC"/*.yaml; do
 done
 
 # ── Summary ──────────────────────────────────────────────────────────────────
+if [ "$CHECK_ONLY" -eq 1 ]; then
+  echo ""
+  echo "Checked: $SKILL_COUNT skill(s), $AGENT_COUNT subagent(s), $PIPELINE_COUNT pipeline YAML(s)"
+  if [ "$MISMATCH_COUNT" -gt 0 ]; then
+    echo "$MISMATCH_COUNT target(s) out of sync"
+    exit 1
+  fi
+  echo "All targets in sync."
+  exit 0
+fi
+
 echo ""
 echo "Orchemist Skills Pack installed:"
 echo "  $SKILL_COUNT skill(s)       in $SKILLS_DST"
