@@ -269,6 +269,110 @@ phases:
 
       Do NOT invent functionality that is not in the issue above. The issue body is the source of truth for what this feature does — if `spec.md` is missing detail, fall back to the issue body, never to your own assumptions.
 
+      ## HARD RULES (return BLOCKED rather than violate any of these)
+
+      **BLOCKED contract (applies to every rule below):** when you raise BLOCKED for ANY of these rules, write the report to `{output_dir}/implement.md` with FIRST LINE = `BLOCKED: <category> — <one-line summary>`, then add 1-3 paragraphs explaining the violation, the disallowed path you considered, and the recommended audit-locked recovery. STOP. Do NOT modify any files in the repository, do NOT create commits, do NOT push. The orchestrator routes the BLOCKED report to the appropriate narrow re-review.
+
+      **BLOCKED is legitimate whether discovered at first read OR during impl** — the protocol does not require attempting impl before raising it. If you read the sealed acceptance artefact and spot a defect immediately, return BLOCKED without writing any code.
+
+      ### HARD RULE — BLOCKED not accommodate
+
+      If satisfying a sealed acceptance assertion would require adding a wrapper, shim package, synthetic log line, entrypoint override, or any new bootstrap file BEYOND what the issue body describes as deliverables, STOP. Do not add the workaround. Test-accommodation workarounds ship as design debt that costs entire follow-up pipelines to rip out. Instead return a BLOCKED report:
+
+        BLOCKED: test §N may be over-literal; observing <contract> requires <workaround>; recommend acceptance-test amendment.
+
+      Write this report to {output_dir}/implement.md and STOP. The orchestrator routes BLOCKED to a narrow acceptance-test review rather than papering over the issue in the code.
+
+      ### HARD RULE — Inverse silent test amendment (bidirectional)
+
+      The BLOCKED escape is BIDIRECTIONAL. Beyond "growing implementation to satisfy over-literal test", you MUST also stop and return BLOCKED when implementation reveals that a sealed test assert, behavioral pin, or numeric tolerance is mathematically/structurally WRONG for the doctrine implementation:
+
+      - Do NOT widen tolerances inline (`<= 10` → `<= 11`) to absorb real doctrine drift.
+      - Do NOT change strict-equality pins (`=== 6.25` → `=== 0`) inline even when the new value is mathematically correct.
+      - Do NOT amend `behavioral.md`/`spec.md` inline to match implementation reality.
+      - Do NOT modify the sealed acceptance file inline from the IMPLEMENT phase. Modifications are permitted only via the orchestrator-driven audit-locked seal-break cycle (SEAL BROKEN commit → narrow re-review APPROVE → re-seal commit on a separate branch state, NOT bundled into the impl commit) — see the seal-break protocol documented in TEST_ADVERSARY's success-transition.
+
+      Report instead:
+
+        BLOCKED: §N's pin <X> is mathematically incorrect for input <shape>; doctrine implementation produces <Y>; recommend acceptance-test amendment to <new pin>.
+
+      Both directions share one purpose: the **audit lock** (narrow re-review of the delta) is what legitimizes any movement of a sealed pin. Silent amendment makes the seal stale-on-claim — the seal still exists, but documents fiction. The IMPLEMENT mandate does not include "amend the contract on the fly," even when the amendment is mathematically necessary.
+
+      ### HARD RULE — TS `as` cast bypass in reject probes (sub-check 1d)
+
+      If a sealed acceptance §N is a TS reject probe (asserts that `tsc` emits a specific diagnostic on an invalid literal), you MUST NOT introduce an `as` type assertion on the load-bearing literal to make compilation work. `as` collapses the literal to the asserted type at the cast site, so the probe silently passes without proving rejection. Canonical fix: typed `const` LHS with direct literal assignment, OR `satisfies` for narrowing without assertion. If your only path to green is via an `as` cast, return BLOCKED — that is a test bug, not an implementation gap.
+
+      ### HARD RULE — Production-code-for-test-convenience (sub-check 7a)
+
+      The following IMPLEMENT-introduced production-code modifications are DISALLOWED when their sole purpose is to satisfy a sealed verify assertion:
+
+      1. **Test-only database migration** — a migration whose only consumer is a verify-script query (a column rename so a §N grep matches; an alias view; a CHECK-constraint relaxation that the production model never needs). Verify-query mismatches are test bugs, not migrations.
+      2. **Test-only env-var knob** — `process.env.X` reads (or equivalents in other languages) whose only effect is to alter test-environment behavior (idle timeouts, retry counts, log-format toggles, shutdown grace). Production code should not grow knobs production never sets.
+      3. **Test-only NODE_ENV (or equivalent) branching** — `if (process.env.NODE_ENV === "test") {{ ... }}` branches in production modules that return different shapes for tests (un-escape `{{`/`}}` to single brace characters when writing the file; the doubling is a Python-format escape required by this prompt template). Production code should be uniform; tests should observe production behavior, not a different code path.
+
+      If your only path to green is one of these patterns, return BLOCKED with the disallowed pattern name. The orchestrator (or REVIEWER) intervenes if the production behavior is correct and the script's assertion is wrong.
+
+      ### HARD RULE — Re-implementation of existing symbol (sub-check 7d)
+
+      **FIRST read `{output_dir}/existing_symbols.md`** (Phase-0 sticky inventory). If `{output_dir}/existing_symbols.md` does NOT exist (this pipeline has no Phase-0 inventory), skip the inventory read entirely and go straight to the ad-hoc grep fallback below. Sections 1-4 enumerate UI primitives, shared libraries, adjacent action/hook patterns, and workspace barrels in this project. Section 5 is the consume-vs-author guidance. Section 6 lists the SPEC-proposed new symbols. Cross-check every new symbol you're about to author against the inventory BEFORE grepping the repo. If the inventory has an exact-match entry: consume (preferred) OR return BLOCKED per the consume-vs-author guidance.
+
+      For symbols NOT in the inventory (or if the inventory has empty sections because the consumer didn't provide grep paths), fall back to ad-hoc grep: scan sibling `*-data.ts`, `_loaders/`, `__tests__/`, `e2e/`, `packages/*/src/`, `lib/`, `utils/`, AND project UI primitive packages (e.g. `@<scope>/ui`, `<repo>/components/ui/`). If a byte-identical or near-identical implementation already exists:
+
+      1. **Consume or extend it** (no BLOCKED needed) — import the existing symbol, or parametrise it (add an options arg) so both call sites share one source. When variants diverge, adopt the *safe superset* (e.g. a try/catch wrapper) — never silently narrow behaviour. Consume-and-extend is the GREEN path; proceed inline.
+      2. If consuming is impossible WITHOUT a shared module the spec did not anticipate (no `_shared/`, cross-package boundary, existing copy is test-scope but you need prod-scope), STOP and return BLOCKED:
+
+           BLOCKED: 7d-duplication — <symbol> duplicates <existing path:line>; consolidating needs <shared module> not in the spec; recommend spec amendment.
+
+         Do NOT copy-paste "to consolidate later." A copy carrying a `// Mirrors <other file> verbatim` comment is the exact anti-pattern this rule exists to stop.
+
+      **7d UI-primitive widening:** when authoring React/Vue/Svelte components, hooks, or browser-side helpers, the grep MUST include the project's UI primitive package(s) (Dialog, Badge, Alert, Popover, Toast, Skeleton, etc.) AND the project's `lib/` / `utils/` directories (date/time formatters, debounce hooks, browser-event listeners). Reinventing a primitive that already exists in the shared UI package is the same sub-check 7d violation as reimplementing a backend symbol. Also: a helper named identically to an existing project helper (e.g. two `formatRelativeTime` functions in different files) is a name-collision risk even when the contracts genuinely differ — rename the new one or parametrise the existing one.
+
+      **7d intra-phase peer collision (added 2026-05-31 — post-Wave-8 dedup audit):** sub-check 7d's normal grep checks the EXISTING repo state at the start of IMPLEMENT. But when the spec proposes authoring MULTIPLE new files in ONE pipeline run (e.g. 7 components in a portfolio dashboard, 3 sibling test routes, paired error+success serializers), the second/third/Nth file is blind to the just-authored peers in the same phase. AFTER writing each new file and BEFORE writing the NEXT new file, grep the SUM of (already-authored peers in this phase + existing repo) for symbol-name collisions on the next file's planned exports. If a collision exists, consume the just-authored peer or refactor BOTH to share a helper. This catches the multi-file-PR antipattern: 7 portfolio components each with their own `formatMoney/formatPct/formatDecimal` triplet shipped in one PR because each component file was authored in isolation. The intra-phase peer-check moves the catch from REVIEW (where it accumulates as debt) to IMPLEMENT (where it consolidates inline at near-zero cost).
+
+      Genuine divergence is NOT duplication: if the near-copy has a real contract-required difference (Ascending vs Descending sort, 1-dp vs 2-dp format), keep it separate AND document why in a leading comment. This rule targets accidental copy-paste, not intentional twins.
+
+      ### HARD RULE — Intra-symbol self-check before file output (sub-check 7e-implement)
+
+      7d (above) catches CONSUMER-side smell: a new symbol that re-implements an EXISTING inventory entry. 7e-implement catches PRODUCER-side smell at AUTHORING time: a new symbol whose own body is about to be written with byte-identical arms.
+
+      Before writing any new file containing a newly-created exported function or method, inspect each `return` / `throw` arm of the function and verify that no two arms are byte-identical modulo whitespace. The check applies symmetrically across language syntaxes: Python `return` / `raise`, JS/TS `return` / `throw`, Go `return`, Rust `Ok(...)` / `Err(...)` arms, bash function `echo` + `exit` arms at the function level. "Byte-identical modulo whitespace" means: strip leading/trailing whitespace, collapse internal whitespace runs to single spaces, then compare; if two arms hash equal under this normalization, they are byte-identical for the purpose of this rule.
+
+      If two arms are identical-modulo-whitespace, you MUST either:
+
+      1. **Refactor the function** to extract the duplicate sub-block to a private helper BEFORE output. The helper is added in the same file (or to the canonical shared-library location surfaced by inventory §2 / §3a if appropriate — recall §3a inventoried pre-existing dual-path helpers expressly so EXTEND remains the preferred verdict over authoring a new duplicate). The refactored arms call the helper. No BLOCKED report needed — proceed inline; the diff at REVIEWER time shows a clean single-source-of-truth.
+
+      2. **Return BLOCKED** if consolidating would change the SPEC §B.4 step structure (e.g. the duplicate is intentional per a documented divergence justification in SPEC §B.5.x, OR the SPEC's contract requires intra-symbol independence between the arms for some explicit reason):
+
+           BLOCKED: 7e-intra-symbol-duplication — <new-symbol> has byte-identical arms at logical lines <N> and <M>; consolidating would change the SPEC §B.4 step structure; recommend SPEC amendment with explicit §B.5.x divergence justification per branch.
+
+         Route to the orchestrator per the BLOCKED contract at the top of this prompt. Do NOT ship the duplicate with a "// will consolidate later" comment — that is the exact anti-pattern this rule exists to stop, mirroring the 7d HARD RULE's "// Mirrors <other file> verbatim" anti-pattern at the consumer-side analogue.
+
+      Genuine intra-symbol divergence is NOT duplication: if two arms differ in even one non-whitespace, non-identifier token (e.g. different SQL projection list, different boolean literal, different sealed string), they are NOT byte-identical and this rule does not fire. Same discipline as 7d: targets accidental copy-paste, not intentional twins.
+
+      Empirical motivation: ToscanAI/value-investing#449's `findCompanyByTicker` shipped with two byte-identical `await db<…>` SQL blocks; the implementer-side self-check at authoring time would have surfaced the duplication BEFORE the PR's diff reached REVIEWER. 7e-implement is the SPEC_ADVERSARY 7e finding's authoring-time complement — same producer-side concern, caught at the moment of code generation.
+
+      ### HARD RULE — §7.2 byte-identical added-block diff lint (sub-check 7e-seal)
+
+      After your implementation commit lands on the feature branch and BEFORE running `git push --set-upstream origin {config[branch_name]}` (i.e. at the post-commit, pre-push boundary), run the diff-lint command below against the feature branch:
+
+          git diff main...HEAD -- '*.ts' '*.tsx' '*.js' '*.jsx' '*.py' '*.go' '*.rs' '*.java' '*.kt' '*.swift' \
+            | grep '^+' | grep -v '^+++' \
+            | sed 's/^+//' \
+            | sort | uniq -c | awk '$1 >= 2 && length($0) > 50'
+
+      Each line of output is a candidate duplicate (a line of 50+ characters that appears 2 or more times in the ADDED lines across the whole diff, in any file). Inspect the candidates:
+
+      - **Zero candidates**: lint passes — proceed to push.
+      - **Contiguous-3-line failure gate**: if any candidate spans a contiguous block of 3 or more adjacent lines (i.e. the duplicate is a multi-line block, not just one stray identical line), the lint FAILS. Either resolve the duplicate inline (extract to a shared helper — same path as the 7e-implement refactor) and amend the commit, OR return BLOCKED:
+
+           BLOCKED: 7e-seal-diff-lint — <file>:<line-A>..<line-B> and <file>:<line-C>..<line-D> are byte-identical <N>-line blocks; consolidation would change the SPEC §B.4 step structure; recommend SPEC amendment.
+
+      - **Single-line candidates** (boilerplate `}};` closers, common import statements, framework-generated stubs, copyright headers, `# noqa` comments): record them in `{output_dir}/implement.md` under a `## §7.2 diff lint candidates (single-line, accepted)` heading with a one-line rationale per candidate, then proceed to push. These do NOT fail the lint; the rationale exists for REVIEWER transparency.
+
+      The lint is a pure static grep — no LLM round-trip — and runs at the IMPLEMENT/push boundary so REVIEWER receives a diff with all multi-line duplicate-block candidates resolved or audit-locked. Threshold parameters (`length($0) > 50`, `$1 >= 2`, contiguous-3-line gate) are intentionally tunable; the defaults are calibrated against the value-investing#449 motivating case (two 5-line `await db<…>` blocks at >70 characters each).
+
+      This HARD RULE complements 7d (consumer-side caller enumeration) and 7e-implement (intra-symbol arm comparison) by adding a cross-file diff lint: 7d catches "new symbol duplicates EXISTING symbol"; 7e-implement catches "intra-symbol arms duplicate each other"; 7e-seal catches "diff contains byte-identical multi-line blocks across any file pair in the diff" — defense in depth across producer-side variants. The §7.2 label preserves issue #6's nomenclature; the lint physically lives in this `implement` phase (NOT in a separate Phase 7 — this YAML's pipeline numbering goes 0, 1a, 1b, 1c, 2, 2c, 3, 3b, 4, 4b, 5 — no literal Phase 7).
+
       ## ANTI-TAMPERING — ENGINE-ENFORCED
       The following actions are detected by the engine and will ABORT the pipeline:
       - Modifying `{output_dir}/acceptance_tests.py` (SHA-256 sealed by adversary)
@@ -301,8 +405,9 @@ phases:
          (from the acceptance_run phase — `"phase": "acceptance_run"`), read the
          `failure_details` field carefully and fix the code to make those tests pass.
       7. Commit with message referencing the issue: `feat/fix(#issue): description`
-      8. Run the full test suite to verify: `{config[test_command]}`
-      9. Push your branch to remote: `git push --set-upstream origin {config[branch_name]}`
+      8. **§7.2 diff lint** — Run the byte-identical added-block diff-grep command from the HARD RULE above; resolve any contiguous-3-line candidate by extracting a shared helper and amending the commit, OR return BLOCKED with category `7e-seal-diff-lint`. Single-line candidates may be accepted with a recorded rationale under `## §7.2 diff lint candidates (single-line, accepted)` in `{output_dir}/implement.md`. Zero candidates: proceed.
+      9. Run the full test suite to verify: `{config[test_command]}`
+      10. Push your branch to remote: `git push --set-upstream origin {config[branch_name]}`
 
       ## Output
       Write a summary of changes to {output_dir}/implement.md including:
@@ -399,6 +504,66 @@ phases:
          - **Edge cases** — Missing error handling, boundary conditions?
          - **Backward compatibility** — Does it break existing behavior?
          - **Test coverage** — Are the changes adequately tested?
+
+      4. Project sub-checks (apply in addition to the 5 categories above):
+
+         **Sub-check 1d — TS `as` cast in reject probes:** any new `as` cast on a load-bearing literal in a TypeScript reject probe is `[BLOCKER][correctness]`. The cast collapses the literal to the asserted type — the probe silently passes without proving rejection. Canonical fix: typed `const` LHS with direct literal assignment, or `satisfies`.
+
+         **Sub-check 5a — Closed-union set-equality:** for each closed union declared by the spec or introduced by the diff, count the union members vs the test-coverage members. Every member MUST appear in at least one test. Flag `[MAJOR][test_coverage]` for any uncovered member.
+
+         **Sub-check 5b — Deferred-as-ok inflation:** scan the diff for any test-output line of the form `ok ".*DEFERRED.*"`, `ok ".*PENDING.*"`, or `ok ".*SKIPPED.*"` (or the language equivalent). The `ok` helper increments the pass counter — a contract that was NOT exercised inflates the summary. Canonical fix: a dedicated `defer_contract` helper with separate counter. Flag `[MAJOR][test_coverage]`.
+
+         **Sub-check 7a — Production-code-for-test-convenience:** any of the following IMPLEMENT-introduced production-code modifications added SOLELY to satisfy a sealed test assertion is `[BLOCKER][correctness]`:
+         - Test-only DB migration (column rename/alias/CHECK-relaxation whose only consumer is a verify query)
+         - Test-only env-var knob (`process.env.X` reads that only alter test-environment behavior)
+         - Test-only `NODE_ENV === 'test'` (or equivalent) branching in production modules
+
+         **Sub-check 7d — Re-implementation of existing symbol:** before approving, verify every NEW top-level helper / loader / formatter / type / component / hook / utility in the diff was checked against existing equivalents.
+
+         **Sticky enforcement (v4 — Phase-0 existing-symbols inventory):** read `{output_dir}/existing_symbols.md` and cross-check EVERY new file/symbol in the diff against inventory sections 1-4. If `{output_dir}/existing_symbols.md` does NOT exist (this pipeline has no Phase-0 inventory), skip the inventory read and apply the same 3-arm logic against the ad-hoc grep targets / the always-on 7h grep below. For each new symbol, verify ONE of:
+         - (a) **Consume verified** — the diff imports the canonical existing symbol from its inventory path (e.g. `import {{ Dialog }} from '@<scope>/ui/dialog'` — un-escape `{{`/`}}` to single-brace characters when writing the file; the doubling is a Python-format escape required by this prompt template).
+         - (b) **Divergence justified** — spec.md has a `## Divergence justification` subsection naming the existing symbol + the contract-required difference; the diff implements the divergence as documented.
+         - (c) **Authored as new** — the new symbol IS recorded in inventory §6 ("SPEC's proposed new symbols") with rationale; the diff authors it at the proposed path. Arm-(c) requires the §6 entry to be specific: `<symbol-name>` ← `<proposed-path:line>` ← (rationale: why no existing inventory entry suffices). A §6 entry that merely says "new symbol" without the path AND the rationale is NOT a valid arm-(c) — flag as `[MAJOR][test_coverage]` against inventory hygiene.
+
+         Any new symbol in the diff that overlaps with inventory §1-4 WITHOUT one of (a)/(b)/(c) is `[MAJOR][correctness]` — REQUEST_CHANGES is the canonical disposition. Do NOT approve with a "follow-up issue" or "we'll consolidate later" carve-out unless the duplicate is across a HARD-NO byte-locked file (in which case, cite the specific verify-script line that locks the byte). Even when the duplication does not break correctness, the carve-out pattern accrues unbounded debt — proven by ToscanAI/value-investing Wave-8 closure dropping 18 catalogued dup groups → 15 fresh candidates within one EPIC cycle. REQUEST_CHANGES; the orchestrator routes to FIX phase for inline consolidation (R2 fix-pass). The "redundancy is a separate program" doctrine means "Wave-N batches happen as their own PRs" — NOT "individual PRs may carve out follow-ups instead of consolidating inline".
+
+         **Sub-check 7h — Diff-symmetric cross-file new-symbol grep (added 2026-05-31 — post-Wave-8 dedup audit):** beyond the inventory §1-4 cross-check above, run an ALWAYS-ON grep against the diff's newly-exported symbols. For every new top-level export in `git diff main...{config[branch_name]}` (functions, classes, interfaces, type aliases, const-as-function), grep the ENTIRE monorepo for an existing function with the IDENTICAL name OR a byte-near-identical body (md5 of normalised body, ignoring whitespace/comments). The targets: `apps/web/`, `packages/*/src/`, `jobs/*/src/`, `scripts/_shared/`. If an existing site is found, flag `[MAJOR][correctness]` with the existing-site `path:line` link and REQUEST_CHANGES. This catches name-collisions even when the inventory is incomplete or the new symbol's path is outside the inventory's pre-configured globs (Phase 0 is greenfield-scoped; 7h is the symmetric REVIEWER-time safety net). Required even when inventory §1-4 are fully populated — the inventory is the AUTHORING-time guard; 7h is the REVIEW-time peer.
+
+         **Backward-compat short-circuit:** if `{output_dir}/existing_symbols.md` sections 1-4 are ALL empty-stubs ("(empty — consumer did not provide inventory inputs)"), the 3-arm test does NOT short-circuit to "no findings". Instead fall back to ad-hoc grep against the standard targets (project UI primitive package(s), `lib/`/`utils/`, sibling files in target directory, workspace barrels) and apply the same 3-arm logic. The Phase-0 inventory is the PRIMARY signal but not the ONLY signal — v3-fallback consumers still get the late-catch via this ad-hoc grep. Sub-check 7h (above) ALSO runs even when the inventory is fully populated — it is the always-on REVIEWER-time peer to the inventory's authoring-time guard.
+
+         Search targets when the inventory is absent OR incomplete (fallback to ad-hoc grep):
+         - Project UI primitive package(s) (Dialog, Badge, Alert, Popover, Toast, Skeleton, Tooltip, Tabs, Card, Input, Button, Label, etc.)
+         - Project shared libraries (`lib/`, `utils/`, `_shared/`)
+         - Sibling files in the same directory (`*-data.ts`, `_loaders/`, `__tests__/`)
+         - Cross-package symbols accessible via the workspace
+         A near-identical implementation rebuilt from scratch is `[MAJOR][correctness]` — recommend refactor to consume, or rename to remove name-collision risk if contracts genuinely diverge. (Lesson recorded after a production audit where a UI-feature PR missed three UI-primitive duplications: Dialog rebuilt while `@<your-org>/ui/Dialog` existed; Badge rebuilt while a sibling Badge primitive existed; a helper named identically to an existing project helper in `lib/`. The v4 Phase-0 inventory + sticky-7d enforcement is the structural fix for this class.)
+
+         **Sub-check 7d-producer — Intra-symbol return-arm comparison:** in addition to the 7d-consumer 3-arm enumeration above (which catches "new symbol re-implements EXISTING inventory entry"), for every NEWLY-CREATED exported function or method in the PR diff that has more than one `return` or `throw` statement (or the language equivalent — Python `return` / `raise`, Go `return`, Rust `Ok` / `Err` arms, bash function `echo` + `exit` arms):
+
+         1. **Quote each return/throw arm VERBATIM in `review.md`** — one fenced code block per arm, citing `file:line` for the arm's leading token (e.g. `# apps/web/lib/queries/companies.ts:8-13`). The verbatim quote is evidentiary; do NOT paraphrase.
+         2. **Assert that at least ONE non-whitespace, non-identifier token differs between any two arms.** If two arms are identical-modulo-whitespace-modulo-identifiers (same SQL projection list, same destructuring shape, same type assertion, same call-site signature), flag `[MAJOR][correctness] intra-symbol dual-path duplication at <file>:<line-A> and <file>:<line-B>` as a REQUEST_CHANGES finding. Recommend refactor to extract the duplicate sub-block to a private helper (R2 fix-pass) OR confirm the IMPLEMENT phase returned BLOCKED per HARD RULE 7e-implement (in which case the case routes to SPEC amendment, not a REVIEWER finding).
+         3. **SPEC §B.5.x divergence-justification short-circuit:** if `spec.md` §B.5 names the dual-path explicitly with a divergence justification (per the SPEC_ADVERSARY 7e check's path-(b) escape — "document a divergence justification per branch in §B.5.x"), read §B.5 first and skip the arm comparison for arms that have an explicit §B.5.x justification entry. Cite the §B.5.x entry in `review.md` to document the skip (e.g. "Arms A and B identical-modulo-whitespace but §B.5.3 justifies via SB#2 fixture short-circuit boundary — short-circuit applied; no finding."). The §B.5.x justification MUST itself meet the concreteness bar (cites sealed string / sort order / precision / type narrowing / environment boundary — NOT "different use case"); a non-concrete §B.5.x triggers `[MAJOR][correctness] 7d-producer §B.5.x justification non-concrete` instead of the duplication finding.
+
+         This is the producer-side complement to the 3-arm 7d-consumer cross-check above: 7d-consumer catches new symbols that duplicate EXISTING inventory entries (caller-enumeration); 7d-producer catches new symbols whose own body contains intra-file byte-identical fragments (producer-enumeration). Empirical motivation: ToscanAI/value-investing#449 (lift commit `11db4eb`) shipped `findCompanyByTicker` with two byte-identical `await db<…>` SQL blocks separated by a fixture short-circuit; the 7d-consumer enumeration APPROVED because the symbol was newly-created (no inventory entry to consume), but 7d-producer's arm comparison would have flagged the intra-file duplication.
+
+         An LLM REVIEWER can quote-and-compare verbatim arms reliably; normalized-hash α-conversion (originally proposed in issue #6 but downgraded per audit R1) requires AST manipulation an LLM would simulate inconsistently. The verbatim-quote requirement is the same level of concreteness as the existing 3-arm cross-check above.
+
+         **HARD RULE — Inverse silent test amendment:** verify that any sealed test pin (numeric tolerance, strict-equality literal, exact-string assertion) is byte-identical to its state at the SEAL commit. If the IMPLEMENT phase modified a sealed pin without an accompanying audit-locked seal-break cycle (separate SEAL BROKEN commit + narrow re-review + re-seal), that is `[BLOCKER][correctness]` — inverse silent amendment. Even when the new pin is mathematically correct, the protocol violation is the issue. Recovery: route to retroactive narrow re-review for the audit lock. (This rule is the REVIEW-phase guard for the same HARD RULE the IMPLEMENT phase enforces preemptively; the two are intentionally paired.)
+
+      5. Seal-break audit-trail verification (when applicable):
+
+         If the branch contains any `SEAL BROKEN` commit, verify the canonical 4-step seal-break protocol (all 4 steps are commits; the narrow re-review APPROVE verdict is captured as an audit-trail reference inside step 2's SEAL BROKEN commit body — NOT as a separate fifth commit):
+
+           1. `chore(#N): seal verify-<issue>.sh` (or equivalent SEAL commit) — records pre-amendment sha256
+           2. `test(#N): amend §<section> — SEAL BROKEN <reason>` — explicit SEAL BROKEN marker in body; the narrow re-review APPROVE verdict is captured in this commit's body as audit-trail reference (not a separate commit)
+           3. `chore(#N): re-seal verify-<issue>.sh after §<section> fix` — records post-amendment sha256
+           4. `feat(#N)`/`fix(#N)` impl commit AFTER the re-seal
+
+         Any deviation (bundled SEAL BROKEN + impl commit; missing re-seal commit; missing audit-lock reference) is `[MAJOR][correctness]` — recovery is retroactive narrow re-review and a corrective re-seal commit.
+
+      ## HARD RULE — Post-review-commit triggers new round
+
+      Any commit made after a reviewer's verdict triggers another reviewer round. Do NOT approve based on a stale state. If commits exist on the branch after this review's prior round (visible in `git log`), the verdict applies to the LATEST commit — do not assume earlier-round approvals carry forward. This rule covers BOTH impl/fix commits AND reviewer self-amendments to `review.md` after the verdict line — do NOT silently edit the prior round's review; emit a new round (`review_roundN+1.md`) with a fresh verdict.
 
       ## Output
       Write your review to {output_dir}/review.md.
