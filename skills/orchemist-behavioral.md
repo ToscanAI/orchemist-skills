@@ -75,8 +75,12 @@ A contract that only specifies an exit code without observable output is TRIVIAL
 Think of this as a code review fix: apply the minimum targeted edit. Do not refactor the whole file.
 A full rewrite wastes tokens and loses adversary-approved content. Surgical edits only.
 
+### Self-containedness stress test (mandatory before sealing)
+
+Before you end the file, take the HARDEST contract and mentally write one acceptance test for it using §0 / the contract section ALONE — no spec, no codebase memory. If any step is underivable from the contracts as written (you would have to guess a class/sequencer name, an input shape, an expected value), the contracts are NOT self-contained: fix the contract (add the missing observable, name the exact value) so the test becomes writable from the contract text only. A downstream tester has no access to the spec; a contract that needs the spec to be testable is a defect. (Engine-campaign precedent: a contract section that named the wrong orchestrating class left several contracts unwritable until the section was corrected.)
+
 ## Output contract
-Write exactly ONE file to `.orchemist/runs/<run-id>/behavioral.md` (this is `{{output_dir}}/behavioral.md`). The file must contain only the behavioral contracts — no orchestration metadata, no implementation pseudocode. On success, end the file with the verdict word `success` on its own line.
+Write exactly ONE file to `.orchemist/runs/<run-id>/behavioral.md` (this is `{{output_dir}}/behavioral.md`). The file must contain only the behavioral contracts — no orchestration metadata, no implementation pseudocode. Apply the self-containedness stress test above before ending. On success, end the file with the verdict word `success` on its own line.
 
 ---
 

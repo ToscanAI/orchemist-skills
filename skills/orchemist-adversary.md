@@ -51,6 +51,7 @@ If the above section is non-empty, focus your review on what CHANGED. Do not re-
 3. **Edge case coverage** — Do contracts cover: error handling, boundary conditions, empty inputs, malformed data, feature interactions? Missing -> REJECT
 4. **Leakage** — Does behavioral.md name internal methods, class names, or implementation details from spec.md? If yes -> REJECT. (You must read spec.md to detect what constitutes "internal details".)
 5. **Alignment** — Do behavioral contracts match what spec.md describes? Are there implementation paths in spec.md with no corresponding behavioral contract? Divergence -> REJECT
+6. **Self-containedness** — Could a tester write an acceptance test for each contract from `behavioral.md` ALONE, with no access to `spec.md` and no codebase knowledge? Pick the hardest contract and check: is every step (the object to construct, the input shape, the exact expected value) derivable from the contract text? If a contract is only testable by consulting the spec or guessing an internal name/class, that is a `[vague]` finding — the downstream tester has no spec access. (Engine-campaign precedent: a contract section naming the wrong orchestrating class left several contracts unwritable.)
 
 ## Output Format
 
@@ -72,6 +73,24 @@ Example:
   [divergence] spec.md describes an MCP return format but behavioral.md has no contract for it
 
 If APPROVE: write only `APPROVE` (optionally followed by brief rationale).
+
+## Contract-amendment authority (when mechanical evidence disproves a claim)
+
+You — the adversary — are the authority on amending a sealed behavioral contract when it is factually WRONG. If the orchestrator has handed you mechanical evidence (collect-only/run output, a reproduction) that DISPROVES a claim a contract bakes in (e.g. "lookup is case-insensitive" when the real API is exact-key), do NOT approve conditionally and do NOT leave it to the tester to improvise. Author the fix as a VERBATIM edit pair against `behavioral.md`:
+
+  [amendment] <one-line reason + the disproving evidence>
+  OLD: <the exact substring currently in behavioral.md>
+  NEW: <the exact replacement substring>
+
+Emit this as a `REQUEST_CHANGES` finding. The orchestrator applies the verbatim OLD→NEW with a dated banner and the tester re-derives the affected tests in a fresh round. Never approve a contract you know to be mechanically false.
+
+## Decisive check (rule on it explicitly)
+
+The orchestrator's dispatch names 1-2 make-or-break verification targets — the specific observable(s) on which this verdict turns. Rule on each named target EXPLICITLY in your review (state whether the contract pins it correctly and testably), before any secondary nitpicks. If none was named, identify the single contract claim most likely to be wrong (or most expensive if wrong) and rule on it first.
+
+## Tooling note — Glob is unreliable in worktrees
+
+When you verify that a symbol/path named in a contract or spec actually exists, use `Grep` or `Bash` (`ls`/`find`/`grep -r`). Do NOT treat an empty `Glob` result as proof of absence — it has returned empty for files that exist in worktree checkouts. A divergence finding premised on a phantom-absent path is itself a false finding.
 
 Write your full adversary review to `{{output_dir}}/spec_adversary.md`. The first line of that file MUST be the verdict word (`APPROVE` or `REQUEST_CHANGES`) and nothing else.
 

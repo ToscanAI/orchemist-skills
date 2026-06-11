@@ -52,6 +52,12 @@ Produce an implementation spec containing ONLY Section B (implementation guidanc
 5. **Risk Assessment** — What could break, backward compatibility concerns
 6. **Observable Outcomes** — For each change, describe what a user/caller can observe (exit codes, stdout content, return values, error messages). The behavioral agent will use these to write tight contracts.
 
+### Issue-staleness discipline (v4.4)
+
+An issue body is a SNAPSHOT from when it was filed — the code may have moved since. Treat it as intent, not as current ground truth:
+- **Re-ground against the code as it exists now.** Phase 0's `existing_symbols.md` and the codebase context are the present-tense truth; where the issue describes a file/symbol/behaviour that no longer matches, ground your spec on what you actually find.
+- **Flag any acceptance-criterion reinterpretation LOUDLY.** If you must reinterpret, narrow, or correct an AC because the issue is stale or internally inconsistent, do NOT silently absorb it. Add a `## AC reinterpretation` subsection stating the original AC, your corrected reading, and why — so the adversary can RATIFY (or reject) the change. An unratified silent reinterpretation is a defect, not a convenience. (Engine-campaign precedent: one run had to correct its issue's claims several times before the spec was sound.)
+
 Be specific. Reference actual file paths and function names from the codebase context.
 
 **CRITICAL INSTRUCTIONS FOR REVISION ROUNDS:**

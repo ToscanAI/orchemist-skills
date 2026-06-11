@@ -127,6 +127,8 @@ Be terse: this file is read by every downstream agent, so concision matters. Aim
 
 Only record symbols you have empirically verified via grep / find / cat. Do NOT speculate. If a section is empty (config input absent OR globs match nothing), use the stub line — do NOT invent placeholder entries.
 
+**Glob is unreliable in worktrees (v4.4).** Expand the grep targets and verify existence with `Grep` or `Bash` (`ls` / `find` / `grep -r`) — NOT the `Glob` tool. In worktree checkouts `Glob` has returned empty for files that demonstrably exist; an empty `Glob` is NOT proof a path is absent. A section wrongly stubbed as empty because `Glob` missed real files removes a real reuse constraint from every downstream phase. When a config-provided path appears to match nothing, re-confirm with `ls`/`find` before writing the empty stub.
+
 After writing the file, respond with a brief 3-line summary:
 1. Total symbols inventoried per section (e.g. "UI: 18, Lib: 4, Actions: 7, Barrels: 12")
 2. Highest-signal entries the SPEC author should consider for this issue

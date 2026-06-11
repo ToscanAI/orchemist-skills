@@ -30,6 +30,8 @@ Per-phase subagent + model mapping:
 
 The `opus` override on `spec_adversary` and `review` reflects [[feedback_max_effort_adversary_reviewer]] — these are the critical quality gates.
 
+**Always pass an EXPLICIT model on every `Agent` dispatch (v4.4 hardening).** Do not rely on the `(default)` rows literally — treat each `(default)` as "the orchestrator's standard working model, named explicitly." On some main-loop models a dispatch that inherits the ambient configuration dies instantly: the subagent returns 0 tokens and an immediate failure (a `400` with a `thinking.type.disabled`-style cause is the signature seen in the engine campaign on 2026-06-10). A 0-token / instant-death return is NOT a content verdict — do NOT route it as `failed` through the phase transitions. Re-dispatch the SAME phase with an explicit model (`sonnet` for the default rows; the table's `opus` for adversary/review; `haiku` only where a phase is explicitly tuned for it). If the explicit re-dispatch also dies instantly, THEN surface it as an infrastructure failure and halt — not a phase `failed`.
+
 **Phase 0 (`existing_symbols_inventory`) MUST use `general-purpose`** — its prompt template instructs the subagent to write `{{output_dir}}/existing_symbols.md` to disk, and read-only subagent types (notably Claude Code's `Explore`, which has no Write/Edit tool) cannot satisfy that contract and silently break the file-write invariant every downstream phase depends on. See `skills/orchemist-existing-symbols-inventory.md` for the full prompt and the safe-default fallback. Field report: ToscanAI/orchemist-skills#9; upstream contract documented at ToscanAI/orchemist#903.
 
 **Skill slug convention:** the orchestrator's `/orchemist:<phase.id>` invocation transforms underscores in `phase.id` to hyphens in the skill slug. Examples following the rule: `phase.id` `existing_symbols_inventory` → skill `/orchemist:existing-symbols-inventory`; `phase.id` `acceptance_test` → skill `/orchemist:acceptance-test`; `phase.id` `acceptance_run` → skill `/orchemist:acceptance-run`. Skill files in `skills/` use the hyphenated form (e.g. `orchemist-existing-symbols-inventory.md`). **Exception:** `phase.id` `spec_adversary` invokes skill `/orchemist:adversary` (file `orchemist-adversary.md`) — the `spec_` prefix is dropped because the adversary skill is shared infrastructure intended to serve future adversarial phases (e.g. an eventual `test_adversary`) without renaming.
@@ -79,6 +81,12 @@ output_dir = <repo_path>/.orchemist/runs/<run_id>/
 ```
 
 Create `<output_dir>` if it does not exist. Persist state in `<output_dir>/state.json`:
+
+**Keep run artifacts OUT of the repo's tracked tree (v4.4).** Writing `.orchemist/runs/` inside the working repo has clobbered tracked files when the run directory collided with versioned paths. Before the first write, ensure ONE of the following holds:
+- the repo's `.gitignore` excludes `.orchemist/` (preferred — verify with `git check-ignore -q <repo_path>/.orchemist || echo "NOT IGNORED"` and add the entry if missing), OR
+- the run directory lives OUTSIDE the repo entirely. Accept an `output_dir:` override in the issue file, or default to an external location (e.g. `~/.orchemist/runs/<run_id>/` or a sibling `<repo>/../.orchemist-runs/<run_id>/`) when the issue file requests it.
+
+Never leave run artifacts as untracked-then-committed noise in the consumer's repo; the run directory is scratch space, not deliverable.
 
 ```json
 {
@@ -245,6 +253,48 @@ Print a summary:
 - Final status (completed/failed/exhausted)
 - Path to `<output_dir>` for the user to inspect
 - If a PR was opened by the `implement` or `fix` phases (look for `git push` output in those files), surface the PR URL
+
+## Process upgrades (v4.4)
+
+These are operating disciplines distilled from a multi-run engine campaign (the cited precedent). They are repo-agnostic; apply them on ANY consumer repo. They are ADDITIVE — no pipeline YAML changes — so they live here as orchestrator behaviour, not as new phases.
+
+### Pre-flight before the test-adversary round
+
+The sealed-acceptance adversarial review (`test_adversary`) reviews the test file but has NO Bash — it cannot run anything. BEFORE dispatching that round, the orchestrator runs the suite itself and hands the evidence to the adversary:
+
+1. **Collect-only**, from the WORKTREE cwd (fixtures may be cwd-sensitive — run from the repo/branch checkout, not from the run directory):
+   `cd <repo_path> && python3 -m pytest <output_dir>/acceptance_tests.py --collect-only -q`
+   A collection error here means the suite is broken at import — capture it; the tests never ran.
+2. **Full run**, same cwd: `cd <repo_path> && python3 -m pytest <output_dir>/acceptance_tests.py -v --tb=short`.
+3. **Extract the failure reason for every anomaly** — for each test whose actual result diverges from the suite's expected-today ledger (a "red" that passed, a "shield" that failed, any collection/`TypeError`/`ImportError`), capture the verbatim reason.
+4. **Embed the evidence in the adversary dispatch prompt** — the collect-only result, the pass/fail tally, and the per-anomaly reasons — so the adversary reviews against ground truth instead of guessing. In the engine campaign this pre-flight caught the defect BEFORE the adversary on multiple runs.
+
+### Contract amendments
+
+When mechanical evidence (the pre-flight above, or a reproduction) DISPROVES a claim baked into a sealed behavioral contract, the contract is amended — never silently worked around, and never "approved with conditions":
+
+- **Authority:** the adversary (the reviewer of that round) authors the fix as a VERBATIM `OLD → NEW` edit pair against `behavioral.md` — the exact substring to replace and its replacement. No prose-only "you should change X."
+- **Application:** the orchestrator applies the verbatim edit to `behavioral.md` and prepends a dated amendment banner naming the round and the disproving evidence (e.g. `<!-- AMENDMENT 2026-06-11 (round 2): contract claim disproved by collect-only evidence; OLD→NEW applied by orchestrator -->`).
+- **Fresh round:** the tester then re-derives the affected test(s) in a FRESH round (per the fresh-subagent policy) against the amended contract. The amendment is NOT a tester improvisation and NOT a conditional approval — it is a first-class, audited contract change.
+
+### Decisive checks
+
+On EVERY adversary dispatch (spec and test alike), the orchestrator names 1-2 **make-or-break verification targets** — the specific observable(s) on which the verdict turns — and asks the adversary to rule on them explicitly. This focuses the review on the load-bearing question instead of diffuse nitpicking. (Engine-campaign precedents: a drop-vs-fallback decision; a `usage.total_cost` field; env-isolation behaviour; a `task.payload["phase_id"]` value — each was the single hinge of its run.) Choose the decisive check from the contract claim most likely to be wrong or most expensive if wrong.
+
+### Surgical revision rounds
+
+Revision rounds (any phase routed back on `request_changes`) are minimum-diff by mandate:
+
+- The revision prompt carries the **verbatim-prescribed fixes** (the adversary's exact findings / OLD→NEW edits) plus an explicit **"everything else stays byte-stable"** instruction.
+- The re-auditor (the next adversary round) is handed the **inter-round diff** as its change surface — `diff -u <output_dir>/<phase>_round<N-1>.md <output_dir>/<phase>.md` (this is already produced as `{{phase_diff}}` for `spec_adversary`; produce the equivalent for any phase being re-audited). It reviews what CHANGED, not the whole file again. In the engine campaign a diff-scoped re-audit took ~1 minute versus a full re-read.
+
+### Seal integrity
+
+The standard pipeline has no built-in tamper check on the sealed test file (only the skip-spec pipeline carries a `verify_tests_integrity` phase). The orchestrator enforces the seal as a process step:
+
+1. **At seal time** — immediately after `acceptance_test` succeeds and BEFORE `implement` runs — hash the test file and record it in `state.json` (e.g. `state.acceptance_test_sha256 = sha256(<output_dir>/acceptance_tests.py)`; capture via `sha256sum`).
+2. **At `acceptance_run`** — re-hash the test file and compare to the sealed hash. A mismatch means the implementer (or anything else) mutated the sealed tests: do NOT count the run; halt with an integrity-failure status and surface which file changed.
+3. **Post-implement, before review** — re-verify once more, so a green `acceptance_run` cannot be laundered by a later edit. The acceptance gate is only trustworthy if the bytes that ran are the bytes that were sealed.
 
 ## Output contract
 
