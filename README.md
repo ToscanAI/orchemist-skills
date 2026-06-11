@@ -48,6 +48,6 @@ The web surface that operates both tracks at scale is the **Orchemist Harness Re
 
 ## Versioning
 
-The pipeline YAML's structural revisions are tracked in [`CHANGELOG.md`](CHANGELOG.md). Current pipeline structure: **v4.2** (Phase 0 existing-symbols inventory + four-verdict schema CONSUME / EXTEND / DIVERGENT / NEW-OK, 2026-05-24). The skills-pack distribution version (`package.json`) tracks separately.
+The pipeline YAML's structural revisions are tracked in [`CHANGELOG.md`](CHANGELOG.md). Current pipeline structure: **v4.4** (process upgrades from the engine standard-pipeline campaign — sealed-test harness rules, test-adversary pre-flight, contract-amendment protocol, decisive checks, surgical revision rounds, seal-integrity verification; process-only, no pipeline-YAML changes, 2026-06-11). The skills-pack distribution version (`package.json`) tracks separately.
 
 License: MIT. See `LICENSE`.

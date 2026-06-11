@@ -58,6 +58,20 @@ You have no access to implementation details. This is by design.
    - Imports come from the actual repo path `{{config.repo_path}}` (python: `sys.path.insert(0, '{{config.repo_path}}')` at top; ts/js: relative import; go: same module)
    - Cover: happy path, edge cases, error cases, and boundary conditions
    - Aim for 5-15 focused behavioral tests
+
+### Harness rules (v4.4) — apply ALL when writing the suite
+
+Each rule below was earned in a multi-run engine campaign where a violation cost a sealed-test round; they are repo-agnostic. A violation makes a test pass or fail for the WRONG reason, which corrupts the red/green gate the implementer relies on. (The `orchemist-tester` subagent definition carries the full rationale — these are the imperative summary.)
+
+- **Module-level imports = today-real names only.** Collection must succeed against the code as it exists now. Import/assert any `[NEW]` (not-yet-built) symbol lazily inside the test body; probe `[DELETED]` modules in-body via `importlib`. A `[NEW]` symbol imported at module scope kills collection and silently skips the whole file.
+- **Every runner-stub / fake callable ends its signature with `**kwargs`.** Sequencers call workers with keyword args; a bare positional stub raises a (often swallowed) `TypeError` → phases report empty/failed and tests fail for the wrong reason.
+- **Copy the contract-named real helper; never hand-roll its construction.** Build real spec/request/config objects with production's own idiom — hand-rolled versions silently drop phantom kwargs (permissive `extra="ignore"` models) or wrap an enum/plain value incorrectly.
+- **Count logs/warnings with a keyword filter scoped to the contract's family — never raw `== []` over a logger.** Pre-existing unrelated warnings contaminate logger-level captures and flake a zero-warning assertion.
+- **Isolate the environment for credential-sensitive contracts.** Factory/object level: `patch.dict(os.environ, {}, clear=True)` + explicit `pop`. CLI level: `monkeypatch.delenv(...)` AND `env={"THE_KEY": ""}` — Click's `CliRunner` `env=` OVERLAYS the parent env, it does NOT unset, so blank the key explicitly.
+- **Derive each test's expected-today status from reachability, with stated reasoning.** For every test decide, against today's code, whether it should PASS now (a shield guarding existing behaviour) or FAIL now (a red awaiting `[NEW]` work), and record the reasoning. A mislabeled ledger corrupts the gate.
+- **CLI tests that drive the real run command must transport-seal the executors UNCONDITIONALLY.** Even if the contract says the build fails before execution, that holds only post-implementation — at HEAD and against buggy code the run reaches REAL phase execution and live HTTP. Patch the executor transport methods class-level as a hermeticity backstop (when the eager guard fires first the patch is harmlessly unused). A post-impl-only rationale is never a license to omit the network seal.
+- **Glob is unreliable in worktrees.** Verify a path/symbol exists with `Grep`/`Bash`; never treat an empty `Glob` as proof of absence.
+
 3. Initialise acceptance results by writing `{{output_dir}}/acceptance_results.json`:
    ```json
    {
@@ -79,6 +93,7 @@ Write exactly ONE summary file to `.orchemist/runs/<run-id>/acceptance_test.md` 
 - List of behavioral contracts (one per test)
 - Rationale for each contract (what aspect of the spec it validates)
 - Any ambiguities in the spec that required assumptions
+- **Expected-today ledger** — a table mapping each test → its expected-today verdict (`PASS-now` shield / `FAIL-now` red) → the one-line reachability reasoning (per the v4.4 harness rules above). The orchestrator's pre-flight and the adversary check this ledger against the actual collect-only + run output; a mislabeled entry is treated as a defect.
 
 Also write the language-specific test file (per the table in step 2) and `{{output_dir}}/acceptance_results.json` as described above. On success, end `acceptance_test.md` with the verdict word `success` on its own line.
 

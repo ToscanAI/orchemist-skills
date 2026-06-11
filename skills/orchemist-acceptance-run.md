@@ -18,6 +18,7 @@ This skill is invoked when the user calls `/orchemist:acceptance-run` directly. 
 ## Task
 
 1. Verify `{{output_dir}}/acceptance_tests.py` exists. If not, write `failed` to `{{output_dir}}/acceptance_run.md` with the reason `acceptance_tests.py not found — implement phase did not produce it` and stop.
+1b. **Seal-integrity check (v4.4).** The sealed test file must be byte-identical to what `acceptance_test` produced — the implementer may NOT mutate the acceptance tests. If `state.json` recorded a seal hash (`acceptance_test_sha256`, written by the orchestrator at seal time), re-hash the file (`sha256sum {{output_dir}}/acceptance_tests.py`) and compare. On a MISMATCH, write `failed` to `{{output_dir}}/acceptance_run.md` with the reason `sealed acceptance tests were modified after seal — integrity check failed (sealed=<hash> now=<hash>)` and stop. Do NOT count a run against tampered tests. (The standard pipeline has no `verify_tests_integrity` phase — that gate exists only on skip-spec — so this in-phase check is the standard pipeline's tamper guard. If no seal hash was recorded, log that the integrity check was skipped and proceed.)
 2. Run the tests:
    ```
    cd {{config.repo_path}}
