@@ -4,6 +4,12 @@ All notable changes to the orchemist-skills pack are recorded here. The pipeline
 
 This changelog uses [Semantic Versioning](https://semver.org/) for the pipeline YAML version field.
 
+## [comic-strip-pipeline 0.1.1] — 2026-06-14
+
+### Fixed — `orch validate` clean for `pipelines/comic-strip-pipeline.yaml`
+
+- The two engine gates (`acceptance_run`, `continuity_check`) now declare `task_type: command` so the engine routes `phase.command` to the command executor (without it the validator treated them as LLM phases missing a prompt); each gate gains the fail-closed `allowed_commands: ["python3", "python"]` allowlist and `working_dir: "{config[repo_path]}"` for the relative `scripts/` paths. `continuity_check` is now terminal via omission (dropped the `success: done` transition that targeted a non-existent phase). Validate exits 0 (0 errors); cross-repo parity stays green.
+
 ## [comic-strip-pipeline 0.1.0] — 2026-06-14
 
 ### Added — first creative pipeline: `pipelines/comic-strip-pipeline.yaml`

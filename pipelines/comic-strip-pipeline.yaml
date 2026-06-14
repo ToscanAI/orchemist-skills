@@ -2,7 +2,7 @@ id: comic-strip-pipeline
 name: "Comic Strip Pipeline"
 description: "10-phase comic-strip pipeline mirroring the coding standard: asset_inventory -> strip_spec -> panel_contracts -> strip_adversary -> acceptance_criteria -> render -> acceptance_run -> art_review -> fix loop -> continuity_check. Adversarial contract review; engine-verified panel validation (deterministic PIL checks + N-vote vision judge) after every render and fix. Character identity is locked by re-framing one approved anchor panel. Markdown-only: the render + judge tools live in the target comic repo (like pytest in the coding pipeline)."
 author: "Toscan"
-version: "0.1.0"
+version: "0.1.1"
 category: "creative"
 tags: [comic, image-generation, creative, review, pipeline]
 use_cases:
@@ -244,8 +244,11 @@ phases:
   - id: acceptance_run
     name: "Panel Acceptance Runner"
     description: "Engine runs the judge command directly — NO agent. Deterministic PIL checks (dims/aspect/count/file) + N-vote vision judge per criterion against acceptance_criteria.json. Writes engine-verified acceptance_results.json. Any failed criterion routes to fix."
+    task_type: command
     max_iterations: 3
     command: "{config[judge_command]}"
+    allowed_commands: ["python3", "python"]
+    working_dir: "{config[repo_path]}"
     transitions: {success: art_review, failed: fix}
 
   # Phase 8: holistic art-director review (opus)
@@ -288,6 +291,9 @@ phases:
   - id: continuity_check
     name: "Continuity Check"
     description: "Final whole-strip regression: rebuild the contact sheet and run a cross-panel continuity judge (same cast identity, room, and lighting across ALL panels). Ensures fixes did not break neighbors."
+    task_type: command
     max_iterations: 2
     command: "python scripts/judge_panels.py --continuity --panels {output_dir}/panels --out {output_dir}/continuity.json"
-    transitions: {success: done, failed: fix}
+    allowed_commands: ["python3", "python"]
+    working_dir: "{config[repo_path]}"
+    transitions: {failed: fix}
