@@ -32,6 +32,13 @@ The `opus` override on `spec_adversary` and `review` reflects [[feedback_max_eff
 
 **Always pass an EXPLICIT model on every `Agent` dispatch (v4.4 hardening).** Do not rely on the `(default)` rows literally — treat each `(default)` as "the orchestrator's standard working model, named explicitly." On some main-loop models a dispatch that inherits the ambient configuration dies instantly: the subagent returns 0 tokens and an immediate failure (a `400` with a `thinking.type.disabled`-style cause is the signature seen in the engine campaign on 2026-06-10). A 0-token / instant-death return is NOT a content verdict — do NOT route it as `failed` through the phase transitions. Re-dispatch the SAME phase with an explicit model (`sonnet` for the default rows; the table's `opus` for adversary/review; `haiku` only where a phase is explicitly tuned for it). If the explicit re-dispatch also dies instantly, THEN surface it as an infrastructure failure and halt — not a phase `failed`.
 
+**Per-phase model tiering (2026-06-14 — guidance, not a hard remap).** The explicit-model rule above STAYS — always name a model. Within that, tier by phase character to cut cost/latency on rote work WITHOUT touching any guardrail:
+
+- **JUDGMENT gates stay `opus` — non-negotiable.** `spec_adversary`, `review`, an eventual `test_adversary`, and the seal-break audit are where the real defects are caught. Never tier these down. (This is exactly the `opus` override [[feedback_max_effort_adversary_reviewer]] mandates; tiering must not erode it.)
+- **MECHANICAL phases MAY tier to `sonnet`.** The existing-symbols inventory (Phase 0), the RED-until-implementation re-validation, and the suite/acceptance COMMAND runs are largely rote grep/parse/run work with the same guardrails regardless of model — `sonnet` is an acceptable explicit choice for them, lowering cost and latency.
+
+This is GUIDANCE: the per-phase table above is still the source of truth for which subagent type runs each phase, and you still pass an explicit model every dispatch. Tiering only narrows the choice of explicit model for the mechanical rows; it never downgrades a judgment gate.
+
 **Phase 0 (`existing_symbols_inventory`) MUST use `general-purpose`** — its prompt template instructs the subagent to write `{{output_dir}}/existing_symbols.md` to disk, and read-only subagent types (notably Claude Code's `Explore`, which has no Write/Edit tool) cannot satisfy that contract and silently break the file-write invariant every downstream phase depends on. See `skills/orchemist-existing-symbols-inventory.md` for the full prompt and the safe-default fallback. Field report: ToscanAI/orchemist-skills#9; upstream contract documented at ToscanAI/orchemist#903.
 
 **Skill slug convention:** the orchestrator's `/orchemist:<phase.id>` invocation transforms underscores in `phase.id` to hyphens in the skill slug. Examples following the rule: `phase.id` `existing_symbols_inventory` → skill `/orchemist:existing-symbols-inventory`; `phase.id` `acceptance_test` → skill `/orchemist:acceptance-test`; `phase.id` `acceptance_run` → skill `/orchemist:acceptance-run`. Skill files in `skills/` use the hyphenated form (e.g. `orchemist-existing-symbols-inventory.md`). **Exception:** `phase.id` `spec_adversary` invokes skill `/orchemist:adversary` (file `orchemist-adversary.md`) — the `spec_` prefix is dropped because the adversary skill is shared infrastructure intended to serve future adversarial phases (e.g. an eventual `test_adversary`) without renaming.
@@ -268,6 +275,12 @@ The sealed-acceptance adversarial review (`test_adversary`) reviews the test fil
 2. **Full run**, same cwd: `cd <repo_path> && python3 -m pytest <output_dir>/acceptance_tests.py -v --tb=short`.
 3. **Extract the failure reason for every anomaly** — for each test whose actual result diverges from the suite's expected-today ledger (a "red" that passed, a "shield" that failed, any collection/`TypeError`/`ImportError`), capture the verbatim reason.
 4. **Embed the evidence in the adversary dispatch prompt** — the collect-only result, the pass/fail tally, and the per-anomaly reasons — so the adversary reviews against ground truth instead of guessing. In the engine campaign this pre-flight caught the defect BEFORE the adversary on multiple runs.
+
+### Full CI-equivalent matrix at acceptance (2026-06-14)
+
+The acceptance step (the `test`/suite phase, and the operator's pre-push gate) MUST run the FULL CI-equivalent gate in ONE pass and surface ALL failures together — not just `verify-<issue>.sh`. Run, in a single sweep: **lint + typecheck + EVERY unit-test config the CI runs** (not only the no-DB subset — include the fixture/seeded config and the default jsdom config; the affected configs are enumerated in Phase 0 §4a) **+ build + the affected verify scripts** (the auto-derived §AFFECTED set from Phase 0). 
+
+Rationale: `verify-<issue>.sh` GREPS the RTL/unit companion tests but does NOT run them, so a GREEN verify script can sit atop RED unit-test configs — the gate passes while the executed tests fail. Running the matrix once means every late-found failure surfaces together instead of being rediscovered serially at pre-push, where each one costs a separate fix round. (Pairs with Phase 0 §4a, which names the configs + companions to include here.)
 
 ### Contract amendments
 
