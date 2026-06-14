@@ -1,0 +1,293 @@
+id: comic-strip-pipeline
+name: "Comic Strip Pipeline"
+description: "10-phase comic-strip pipeline mirroring the coding standard: asset_inventory -> strip_spec -> panel_contracts -> strip_adversary -> acceptance_criteria -> render -> acceptance_run -> art_review -> fix loop -> continuity_check. Adversarial contract review; engine-verified panel validation (deterministic PIL checks + N-vote vision judge) after every render and fix. Character identity is locked by re-framing one approved anchor panel. Markdown-only: the render + judge tools live in the target comic repo (like pytest in the coding pipeline)."
+author: "Toscan"
+version: "0.1.0"
+category: "creative"
+tags: [comic, image-generation, creative, review, pipeline]
+use_cases:
+  - "Generate a character-consistent multi-panel comic strip from a storyboard"
+  - "Promotional comic content with verifiable character + continuity gates"
+
+config_schema:
+  type: object
+  required: [strip_title, storyboard_source, cast, repo_path, branch_name, panel_count]
+  properties:
+    strip_title:
+      type: string
+      description: "Title of the strip / scene"
+    storyboard_source:
+      type: string
+      description: "GROUND TRUTH — the storyboard/script: ordered beats, per-panel dialogue (verbatim), characters present, setting. The strip MUST realize this and only this."
+    cast:
+      type: string
+      description: "GROUND TRUTH — each character's canonical traits + reference image path(s) (the finished art the renderer must match). New characters (no finished art) are flagged design-from-description."
+    style_bible:
+      type: string
+      default: ""
+      description: "Art direction: palette, lighting, line treatment, caption/bubble style, format."
+    repo_path:
+      type: string
+      description: "Absolute path to the comic project repo — holds the render + judge tools (scripts/) and receives the rendered panels."
+    branch_name:
+      type: string
+    anchor_panel_id:
+      type: string
+      default: "p01"
+      description: "The establishing panel rendered first and approved; every other panel re-frames a CAPTION-CROPPED copy of it, locking character identity, room, and lighting. This is the consistency backbone."
+    panel_count:
+      type: integer
+      description: "Number of panels in the strip."
+    target_dims:
+      type: string
+      default: "1080x1350"
+      description: "Exact output pixel dimensions (4:5 Instagram). Enforced deterministically in acceptance_run."
+    aspect_ratio:
+      type: string
+      default: "4:5"
+    image_model:
+      type: string
+      default: "gemini-3-pro-image-preview"
+      description: "Image model (Nano Banana Pro). NOT 3.1-flash — quality is markedly worse."
+    judge_votes:
+      type: integer
+      default: 3
+      description: "Vision-judge votes per criterion; majority wins (adversarial-verification analog)."
+    render_command:
+      type: string
+      default: "python scripts/generate-comic-panels.py --brief {output_dir}/strip_brief.py --force"
+      description: "Run in repo_path. Renders panels from the brief the render phase writes."
+    judge_command:
+      type: string
+      default: "python scripts/judge_panels.py --criteria {output_dir}/acceptance_criteria.json --panels {output_dir}/panels --votes {config[judge_votes]} --out {output_dir}/acceptance_results.json"
+      description: "Run in repo_path. The engine acceptance gate: deterministic PIL checks + N-vote vision judge per panel; writes acceptance_results.json. NO agent."
+
+example_input:
+  strip_title: "Should We Have a Child? — Part 2: The Session"
+  storyboard_source: "Long-Video table of CL_SB_P&C 6: 10 beats, couples-therapist office, verbatim dialogue per beat."
+  cast: "Alex: man, dark tousled hair, round glasses, grey tee (ref: drive-assets/instagram/Post14/InstagramPost14_Panel1.png). Taylor: woman, long dark LOOSE hair, white tee (same ref). Therapist: NEW (design-from-description) — ~50s, silver-grey hair, glasses, sage cardigan, notepad."
+  repo_path: "/home/toscan/renerivera-author"
+  branch_name: "comic/should-we-have-a-child-part2"
+  panel_count: 10
+
+phases:
+  # Phase 1: inventory the canonical references (resolves "which ref?" drift up front)
+  - id: asset_inventory
+    name: "Asset Inventory"
+    description: "Inventory the canonical references the strip must match: per-character finished-art reference path, style bible, anchor-panel plan. Flags any character lacking finished art (design-from-description)."
+    model_tier: sonnet
+    thinking_level: medium
+    max_iterations: 2
+    transitions: {success: strip_spec, failed: asset_inventory}
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing ASSET_INVENTORY (1/10). Output feeds strip_spec — not a human. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      You are a comic art director taking inventory before a strip is specced.
+
+      ## GROUND TRUTH
+      **Strip:** {config[strip_title]}
+      **Storyboard:** {config[storyboard_source]}
+      **Cast:** {config[cast]}
+      **Style bible:** {config[style_bible]}
+
+      ## Task
+      Produce a reference manifest:
+      1. **Cast table** — for each character in the storyboard: canonical traits (hair, wardrobe, build, glasses, etc.) and the EXACT reference image path(s) to lock to. Mark any character with no finished-art reference as `DESIGN-FROM-DESCRIPTION` and propose a fixed design.
+      2. **Anchor plan** — confirm `{config[anchor_panel_id]}` as the establishing panel that all others re-frame; note that a caption-cropped copy of it becomes the sole reference for panels 2..N.
+      3. **Format constants** — dims {config[target_dims]}, aspect {config[aspect_ratio]}, model {config[image_model]}.
+
+      Write the manifest to {output_dir}/asset_inventory.md
+
+  # Phase 2: render guidance (Section B) — HOW, not the panel contracts
+  - id: strip_spec
+    name: "Strip Spec"
+    description: "Interpret the storyboard into render guidance (Section B): per-panel shot type, who is in frame, reframe-vs-fresh, which reference. Does NOT write panel contracts."
+    model_tier: sonnet
+    thinking_level: high
+    max_iterations: 4
+    transitions: {success: panel_contracts, failed: strip_spec}
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing STRIP_SPEC (2/10). Output feeds panel_contracts. Write render guidance only — not behavioral contracts. Do not ask questions. [/PIPELINE CONTEXT]
+
+      You are a comic director turning a storyboard into a shot plan.
+
+      ## GROUND TRUTH
+      **Storyboard:** {config[storyboard_source]}
+      Read {output_dir}/asset_inventory.md for the locked references.
+
+      If a prior adversary review exists at {output_dir}/strip_adversary.md, read it and address ALL findings (surgical edits only — do not rewrite unflagged panels).
+
+      ## Previous Work
+      {phase_summary}
+      ## Prior Rounds
+      {iteration_history}
+
+      ## Task — Section B: Render Guidance (per panel)
+      For each of the {config[panel_count]} panels:
+      - **Shot** — establishing-wide / medium two-shot / close-up on <character>.
+      - **In frame** — exactly who appears (and who must NOT).
+      - **Reference** — the anchor `{config[anchor_panel_id]}` is rendered first and approved; panels 2..N re-frame the caption-cropped anchor. State the small change (hand/expression/pose) vs the anchor.
+      - **Beat + verbatim dialogue** — copy the dialogue EXACTLY from the storyboard; never paraphrase.
+      Decisive rhythm: pace wides and character close-ups so the conversation reads. Avoid back-of-head foreground framings.
+
+      Write to {output_dir}/strip_spec.md
+
+  # Phase 3: panel behavioral contracts (Section A) — WHAT is visible, not HOW
+  - id: panel_contracts
+    name: "Panel Behavioral Contracts"
+    description: "Per-panel contracts describing WHAT must be visible (characters + canonical traits, shot, verbatim dialogue, continuity, format) — never HOW to prompt. These drive the acceptance criteria."
+    model_tier: sonnet
+    thinking_level: high
+    max_iterations: 3
+    transitions: {success: strip_adversary, failed: panel_contracts}
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing PANEL_CONTRACTS (3/10). Output feeds the adversary. Describe WHAT each panel shows, not the prompt wording. Do not ask questions. [/PIPELINE CONTEXT]
+
+      You are a contract specialist. Translate the shot plan into precise, checkable panel contracts.
+      Read {output_dir}/strip_spec.md and {output_dir}/asset_inventory.md.
+      On a revision round, fix ONLY adversary-flagged contracts; keep approved ones byte-identical.
+
+      ## Format — one block per panel
+      For panel <id>, assert as a checklist of OBSERVABLE facts:
+      - **Characters present** and, for each, the canonical trait that MUST be visible (e.g. "Therapist: silver-grey hair", "Alex: round glasses").
+      - **Absent** — who/what must NOT appear (e.g. "no narration caption box", "Alex holds no booklet").
+      - **Dialogue** — the EXACT speech-bubble text, verbatim, and how many bubbles.
+      - **Continuity** — same room/lighting/wardrobe as the anchor; correct left/right positions.
+      - **Format** — dims {config[target_dims]}, aspect {config[aspect_ratio]}.
+
+      ## Rules (anti-trivial-satisfaction)
+      - Every character-state that drifted in past runs MUST be pinned: hair, wardrobe, glasses, props, side. An unpinned trait is a defect — pin it.
+      - Dialogue contracts are verbatim string-match, not "mentions kids".
+      - No HOW: do not specify prompt phrasing, model params, or reference mechanics here.
+
+      Write to {output_dir}/panel_contracts.md
+
+  # Phase 4: adversarial review of the contracts (opus, fresh eyes)
+  - id: strip_adversary
+    name: "Strip Adversary Review"
+    description: "Adversarially review panel contracts BEFORE rendering. Hunts the known image failure modes: unpinned character state -> drift, reference text-leakage, awkward shot risk, un-anchored characters, design-from-description gaps, non-verbatim dialogue, trivially-satisfiable contracts."
+    model_tier: opus
+    thinking_level: high
+    max_iterations: 3
+    transitions:
+      approve: acceptance_criteria
+      request_changes: strip_spec
+      failed: strip_adversary
+      success: strip_spec   # fallback: if verdict extraction fails, loop back conservatively
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing STRIP_ADVERSARY (4/10). Your verdict gates whether the contracts are strong enough to drive acceptance. On REQUEST_CHANGES, the spec + contract phases see your findings. Do not ask questions. [/PIPELINE CONTEXT]
+
+      You are an adversarial reviewer who has seen comic generators drift. Find weaknesses in the panel contracts BEFORE acceptance criteria are written.
+      Read {output_dir}/panel_contracts.md, {output_dir}/strip_spec.md, {output_dir}/asset_inventory.md.
+
+      ## Failure modes to hunt (each is a finding if present)
+      1. **Unpinned state -> drift** — any character whose hair / wardrobe / glasses / prop / left-right side is not explicitly pinned for a panel it appears in. (Real precedent: therapist rendered as 3 different people; booklet appeared/vanished; hair flipped loose<->ponytail.)
+      2. **Reference text-leakage** — a panel that re-frames a reference carrying baked-in caption text, without an explicit "render no caption box / copy no text from the reference" assertion. (Precedent: a prior post's caption leaked into a panel.)
+      3. **Awkward-shot risk** — framings that tend to produce back-of-head foreground or cropped faces.
+      4. **Design-from-description gaps** — a character with no finished-art reference whose fixed design is not specified.
+      5. **Non-verbatim dialogue** — contract says "mentions X" instead of the exact bubble string.
+      6. **Trivial satisfaction** — a contract a wrong panel could pass.
+
+      ## Output
+      For each finding: panel id, failure-mode, why it will bite, and the exact contract amendment.
+      End with a verdict line: `VERDICT: APPROVE` or `VERDICT: REQUEST_CHANGES`.
+      Write to {output_dir}/strip_adversary.md
+
+  # Phase 5: acceptance criteria (sealed) — from contracts ALONE
+  - id: acceptance_criteria
+    name: "Panel Acceptance Criteria"
+    description: "From the approved contracts ALONE, emit a machine-checkable criteria file (JSON) the judge engine consumes: deterministic checks + per-panel binary vision-judge criteria. Sealed before render — the renderer cannot teach-to-the-test."
+    model_tier: sonnet
+    thinking_level: high
+    max_iterations: 2
+    transitions: {success: render, failed: acceptance_criteria}
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing ACCEPTANCE_CRITERIA (5/10). Derive checks from {output_dir}/panel_contracts.md ONLY — you have no render to peek at. Output is consumed by an engine, not a human. [/PIPELINE CONTEXT]
+
+      Emit a JSON acceptance spec the judge tool runs. Schema:
+      {{
+        "deterministic": {{ "dims": "{config[target_dims]}", "aspect": "{config[aspect_ratio]}", "panel_count": {config[panel_count]} }},
+        "panels": [
+          {{ "id": "<panel id>",
+             "vision_criteria": [
+               {{ "key": "therapist_silver_hair", "question": "Does the therapist have silver-grey hair? Answer strictly Y or N.", "expect": "Y" }},
+               {{ "key": "alex_round_glasses",   "question": "Is the man (Alex) wearing round glasses?", "expect": "Y" }},
+               {{ "key": "no_caption_box",        "question": "Is there any narration caption box (not a speech bubble) in the image?", "expect": "N" }},
+               {{ "key": "bubble_text",           "question": "Does a speech bubble read exactly: \"<verbatim>\"?", "expect": "Y" }}
+             ] }}
+        ]
+      }}
+      Rules:
+      - One binary criterion per PINNED fact in the contract (presence, absent-prop, no-caption, correct-side, verbatim bubble text). Each `expect` is Y or N.
+      - Questions must be answerable from the panel image alone, unambiguously.
+      - Do NOT invent criteria beyond the contracts; do NOT relax a pinned fact.
+      Write to {output_dir}/acceptance_criteria.json
+
+  # Phase 6: render (engine/tool — runs the render command in repo_path)
+  - id: render
+    name: "Render Panels"
+    description: "Write the render brief from the spec + criteria (anchor first, then caption-cropped-anchor reframes), then run the render command in repo_path to produce panels into {output_dir}/panels/."
+    model_tier: sonnet
+    thinking_level: low
+    max_iterations: 3
+    transitions: {success: acceptance_run, failed: render}
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing RENDER (6/10). Produce the brief, then invoke the render tool. On a fix round, re-render ONLY the panel ids named in {output_dir}/fix.md. [/PIPELINE CONTEXT]
+
+      1. From {output_dir}/strip_spec.md + asset_inventory.md, write the render brief to {output_dir}/strip_brief.py:
+         OUTDIR, STYLE, BASE (caption-cropped anchor for panels 2..N), PANELS[{{id, refs, prompt}}].
+         Each non-anchor prompt: "same scene/characters/room/lighting as the reference; <shot>; <small change>; render ONLY the named speech bubble(s); NO narration caption boxes; never copy text from the reference" and restate pinned traits.
+      2. Run, in {config[repo_path]}: `{config[render_command]}`
+      3. Write a short log (which panels rendered, any errors) to {output_dir}/render.md
+
+  # Phase 7: acceptance_run (ENGINE — no agent — deterministic + vision judge)
+  - id: acceptance_run
+    name: "Panel Acceptance Runner"
+    description: "Engine runs the judge command directly — NO agent. Deterministic PIL checks (dims/aspect/count/file) + N-vote vision judge per criterion against acceptance_criteria.json. Writes engine-verified acceptance_results.json. Any failed criterion routes to fix."
+    max_iterations: 3
+    command: "{config[judge_command]}"
+    transitions: {success: art_review, failed: fix}
+
+  # Phase 8: holistic art-director review (opus)
+  - id: art_review
+    name: "Art Review"
+    description: "Holistic art-director pass on the full strip: pacing, composition, emotional arc, aesthetic coherence, and 'anything weird' the binary criteria can't catch (awkward crops, off compositions)."
+    model_tier: opus
+    thinking_level: high
+    max_iterations: 3
+    transitions:
+      approve: continuity_check
+      request_changes: fix
+      abort: fix
+      failed: art_review
+      success: continuity_check
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing ART_REVIEW (8/10). The criteria gate already passed; you judge what it can't: composition + aesthetics. On REQUEST_CHANGES the fix phase sees your findings. [/PIPELINE CONTEXT]
+
+      View the panels in {output_dir}/panels/ and read {output_dir}/acceptance_results.json.
+      Assess: reading flow + pacing across panels; composition quality (no awkward back-of-head/foreground masses, no cropped faces); emotional arc; aesthetic coherence with the style bible.
+      List only ACTIONABLE issues, each tagged to a panel id with the minimal re-roll instruction.
+      End with: `VERDICT: APPROVE`, `VERDICT: REQUEST_CHANGES`, or `VERDICT: ABORT`.
+      Write to {output_dir}/art_review.md
+
+  # Phase 9: fix (minimal targeted re-rolls)
+  - id: fix
+    name: "Apply Fixes"
+    description: "Translate failed acceptance criteria + art-review findings into a minimal per-panel re-roll list. Surgical: only the named panels change; approved panels are untouched."
+    model_tier: sonnet
+    thinking_level: low
+    max_iterations: 3
+    transitions: {success: render, failed: fix}
+    prompt_template: |
+      [PIPELINE CONTEXT] You are executing FIX (9/10). Read {output_dir}/acceptance_results.json (failed criteria) and {output_dir}/art_review.md (if present). [/PIPELINE CONTEXT]
+
+      For each panel that failed a criterion or was flagged by art_review, write a minimal corrective note: panel id + the exact change (pin the violated trait harder, drop the leaked caption, change the shot to avoid back-of-head, remove the stray prop). Prefer a targeted self-edit (reference the panel itself + "keep everything else identical, change only X") over a full re-roll. Touch NO panel that passed and was unflagged.
+      Write the fix list to {output_dir}/fix.md (the render phase consumes it and re-renders only these ids).
+
+  # Phase 10: whole-strip continuity regression (ENGINE)
+  - id: continuity_check
+    name: "Continuity Check"
+    description: "Final whole-strip regression: rebuild the contact sheet and run a cross-panel continuity judge (same cast identity, room, and lighting across ALL panels). Ensures fixes did not break neighbors."
+    max_iterations: 2
+    command: "python scripts/judge_panels.py --continuity --panels {output_dir}/panels --out {output_dir}/continuity.json"
+    transitions: {success: done, failed: fix}

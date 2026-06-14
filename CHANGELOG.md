@@ -4,6 +4,22 @@ All notable changes to the orchemist-skills pack are recorded here. The pipeline
 
 This changelog uses [Semantic Versioning](https://semver.org/) for the pipeline YAML version field.
 
+## [comic-strip-pipeline 0.1.0] — 2026-06-14
+
+### Added — first creative pipeline: `pipelines/comic-strip-pipeline.yaml`
+
+The pack's first non-coding pipeline. It ports the standard pipeline's spine — ground-truth spec → adversarial contract review → sealed acceptance → engine-verified gate → fix loop — to character-consistent multi-panel comic-strip generation. **Markdown-only purity preserved**: the render + judge tools live in the consumer's comic repo (like pytest in the coding pipeline), referenced via `render_command` / `judge_command`; nothing Python ships here.
+
+- **10 phases**, mirroring the coding standard's tiers: `asset_inventory → strip_spec → panel_contracts → strip_adversary (opus) → acceptance_criteria → render → acceptance_run (engine) → art_review (opus) → fix → continuity_check (engine)`. One artifact per phase under `.orchemist/runs/<id>/`.
+- **Behavioral contracts for images** — `panel_contracts` asserts WHAT is visible (characters + canonical traits, verbatim bubble text, absent props, continuity, dims), never the prompt wording. The WHAT-not-HOW rule transfers intact.
+- **The adversary hunts known image failure modes** — unpinned character state → drift, reference text-leakage, back-of-head shots, design-from-description gaps, non-verbatim dialogue, trivial satisfaction. Derived from a real session where a therapist rendered as three different people, a prior post's caption leaked into a panel, and a prop appeared/vanished between panels.
+- **"What is an image acceptance test?"** — `acceptance_criteria` emits a sealed JSON (from contracts alone) of deterministic PIL checks (dims/aspect/count/file) + per-panel binary vision-judge criteria; the engine `acceptance_run` runs the consumer's `judge_panels.py` (N-vote majority) and writes `acceptance_results.json`, branching on exit code exactly like pytest.
+- **Consistency invariant** — `anchor_panel_id` is rendered + approved first; panels 2..N re-frame a caption-cropped copy of it, locking identity, room, and lighting (the reframe technique that took a drifting scene to a consistent one in the source session).
+
+Reference consumer tools (live in the comic repo, not here): `scripts/generate-comic-panels.py` (render — Gemini `gemini-3-pro-image-preview`, 4:5→1080×1350, reference-image consistency) and `scripts/judge_panels.py` (the acceptance engine). Example input: `examples/example-strip.md`.
+
+Pipeline YAML version `0.1.0` — **alpha**. One end-to-end manual pilot (a 10-panel couples-therapist strip) validated the phase logic; the judge gate was smoke-tested standalone (3-vote majority, deterministic exit code).
+
 ## [4.4.0] — 2026-06-11
 
 ### Added — process upgrades from the engine campaign (closes [#21](https://github.com/ToscanAI/orchemist-skills/issues/21))
