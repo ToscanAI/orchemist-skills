@@ -72,6 +72,15 @@ Each rule below was earned in a multi-run engine campaign where a violation cost
 - **CLI tests that drive the real run command must transport-seal the executors UNCONDITIONALLY.** Even if the contract says the build fails before execution, that holds only post-implementation — at HEAD and against buggy code the run reaches REAL phase execution and live HTTP. Patch the executor transport methods class-level as a hermeticity backstop (when the eager guard fires first the patch is harmlessly unused). A post-impl-only rationale is never a license to omit the network seal.
 - **Glob is unreliable in worktrees.** Verify a path/symbol exists with `Grep`/`Bash`; never treat an empty `Glob` as proof of absence.
 
+### Render-determinism preflight (2026-06-14) — MANDATORY for computed-style / a11y specs
+
+ANY e2e spec this phase authors that reads COMPUTED STYLE (`getComputedStyle` / Playwright `.evaluate(el => getComputedStyle(el)...)`) OR runs an a11y/axe check MUST satisfy BOTH of the following, or it produces a verdict for the WRONG reason:
+
+- **Kill transitions+animations BEFORE any theme toggle.** Before flipping the `.dark` / theme class (or any class that animates colour), inject a kill-switch: `await page.addStyleTag({content:'*,*::before,*::after{transition:none!important;animation:none!important}'})`. Colour reads taken mid-`transition-colors` return an in-between value — the read is not SETTLED. Inject the kill-switch immediately after navigation and again after any DOM swap that could re-arm a transition.
+- **The colour parser MUST accept 8-digit hex AND `rgb()`/`rgba()`, not 6-digit hex only.** Accept `#RRGGBB`, `#RRGGBBAA`, `rgb(r,g,b)`, and `rgba(r,g,b,a)`. Production CSS minifiers (e.g. Lightning CSS under `next start`) emit dark design tokens carrying alpha — e.g. `rgba(…,.15)` — as 8-digit hex (`#RRGGBBAA`). A 6-digit-only parser silently MISSES the dark value and reports a phantom "no colour applied" failure. Normalise both forms to comparable channels before asserting.
+
+GROUNDING: an EPIC-20 production run burned **3 seal-break rounds** chasing a phantom "frozen-utility" bug that was in fact a mid-`transition-colors` colour read (compounded by a 6-digit-only parser missing the 8-digit dark token). This preflight prevents the entire defect class — apply it unconditionally to any colour/contrast/a11y spec, even when the contract does not name animation.
+
 3. Initialise acceptance results by writing `{{output_dir}}/acceptance_results.json`:
    ```json
    {

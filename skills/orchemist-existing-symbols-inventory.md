@@ -62,6 +62,17 @@ Aim for a curated, high-signal inventory:
 - For UI primitives: include the prop-type name AND any variants/options (so SPEC can reference `<Badge variant="..." />` shapes precisely).
 - For adjacent action patterns: extract the canonical try/catch/auth/ownership boilerplate as a code-snippet anchor (file:line range), so SPEC + IMPLEMENT can `mirror byte-shape`.
 
+### Affected unit-test configs + RTL companion enumeration (2026-06-14) — MANDATORY when the issue is a DESIGN/structure change to a component
+
+When the issue rebuilds or restructures a component (design change, markup re-layout, primitive swap), the verify scripts that PIN that component typically only GREP its RTL/unit companion tests — they do NOT run them. So those jsdom companions assert the OLD design, sail through the verify-script gate (greps still match), and then BREAK when actually executed (at pre-push / CI). To force IMPLEMENT to reconcile them IN-BAND instead of rediscovering them serially at pre-push, Phase 0 MUST enumerate, **per affected verify script**:
+
+1. **Which RTL/unit companion test files that verify script PINS.** Grep the verify scripts (`verify-*.sh` and the nightly/CI scripts) for `*.test.ts` / `*.test.tsx` references (e.g. `grep -rEoh '[A-Za-z0-9_./-]+\.test\.tsx?' <verify-scripts>`), and list the test files tied to each script.
+2. **Which test config each pinned companion RUNS IN.** Most monorepos have multiple jest/vitest projects — a no-DB subset, a fixture/seeded config, and the default jsdom config. Identify (from the test-runner config: `jest.config.*` / `vitest.config.*` / package `test:*` scripts) which project/config each pinned companion executes under, because the CI runs configs the verify script never invokes. Listing the config makes the full-matrix acceptance step (orchemist-run) know which configs to run.
+
+**Auto-§AFFECTED derivation (do NOT hand-list).** Derive the §AFFECTED nightly/verify set by GREPPING for the scripts that reference the touched files AND the pinned tests — e.g. `grep -rl '<touched-file-basename>' <verify-script-dir>` unioned with the scripts that grep-pin the companion tests above. Hand-listing §AFFECTED recurrently UNDER-enumerates (a script that pins the component is silently dropped). The grep-derived set is the floor; a human may add to it but never shrink below the grep result.
+
+GROUNDING: an EPIC-20 child missed a verify script in §AFFECTED and then discovered TWO jsdom RTL regressions SERIALLY at pre-push (one fix round each) — both were companions the verify scripts grepped but never ran. Enumerating them in Phase 0 collapses that to a single in-band reconciliation.
+
 ## Output
 
 Write your inventory to `{{output_dir}}/existing_symbols.md`. Use this exact section structure (so downstream phases have stable anchors):
@@ -94,6 +105,12 @@ For every helper in §2 (project shared libraries) whose body contains a multi-b
 ## 4. Workspace barrels (consumable cross-package imports)
 
 <one entry per exported package symbol, OR empty stub>
+
+## §4a. Affected verify scripts → pinned RTL/unit companions + test config (design/structure changes; 2026-06-14)
+
+Populate ONLY when the issue is a design/structure change to a component (else write `(empty — not a component design/structure change)`). One row per affected verify script: the verify-script path → the `*.test.ts(x)` companions it PINS (grep-derived) → the test config/project each companion runs in (no-DB subset / fixture-seeded / default jsdom). Then a `§AFFECTED (auto-derived):` line listing the grep-derived nightly/verify set (scripts referencing the touched files ∪ scripts pinning the companions). IMPLEMENT must reconcile every listed companion IN-BAND; the full-matrix acceptance step runs every listed config.
+
+<rows per the format above, OR `(empty — not a component design/structure change)`>
 
 ## 5. Consume-vs-author guidance (sub-check 7d enforcement)
 
@@ -184,6 +201,9 @@ After the subagent returns:
      (empty — phase exhausted)
 
      ## 4. Workspace barrels (consumable cross-package imports)
+     (empty — phase exhausted)
+
+     ## §4a. Affected verify scripts → pinned RTL/unit companions + test config
      (empty — phase exhausted)
 
      ## 5. Consume-vs-author guidance (sub-check 7d enforcement)
