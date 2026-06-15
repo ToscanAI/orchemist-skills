@@ -309,6 +309,17 @@ The standard pipeline has no built-in tamper check on the sealed test file (only
 2. **At `acceptance_run`** — re-hash the test file and compare to the sealed hash. A mismatch means the implementer (or anything else) mutated the sealed tests: do NOT count the run; halt with an integrity-failure status and surface which file changed.
 3. **Post-implement, before review** — re-verify once more, so a green `acceptance_run` cannot be laundered by a later edit. The acceptance gate is only trustworthy if the bytes that ran are the bytes that were sealed.
 
+### Commit before dispatching a git/Bash-capable subagent
+
+A subagent that has Bash/git tools — a `general-purpose` reviewer running `git diff origin/main...<branch>`, a verify-runner, a fix agent — can mutate the ORCHESTRATOR'S working tree (`git restore` / `checkout` / `stash` to inspect a clean diff) and thereby **silently revert your uncommitted changes**. This is the same "the bytes that ran are not the bytes you think" failure mode as seal integrity, on the other side: you proved a working-tree edit green, then a git-capable subagent reverted it before it was committed.
+
+Field report (a production EPIC-20 run): a seal-break edit was applied to the working tree and proven green, then a git-capable REVIEW subagent restored the tree to diff it cleanly — reverting the fix. A later commit captured only an unrelated artifact, so the committed test hashed to the OLD sealed value. The reviewer itself reported "the fix doesn't exist on the branch"; without a sha cross-check this would have shipped a false-green.
+
+Discipline:
+1. **Commit any uncommitted working-tree change BEFORE dispatching a subagent with git/Bash.** A committed change survives the subagent's git ops. Most acute in the seal-break flow (edit → narrow review) and the implement/fix → review loop. (If you must keep it uncommitted, `git stash` it yourself and restore after — do not rely on the subagent to leave the tree untouched.)
+2. **After such a subagent returns, COMMAND-VERIFY** the working tree / HEAD still carries your intended bytes (`git status`; `git show HEAD:<file> | sha256sum` vs the expected/re-sealed sha) before trusting any "green" claim it made.
+3. **Prefer a read-only reviewer subagent type** (Read/Grep/Glob only — e.g. the `orchemist-adversary`) for pure review; it cannot mutate the tree. Reach for a full-tools `general-purpose` reviewer only when it must run commands — and commit first.
+
 ## Output contract
 
 Write exactly ONE file to `.orchemist/runs/<run-id>/orchestrator.md` summarising the run. Update `state.json` after every phase. On success, end the orchestrator log with the verdict word `success` on its own line. On failure, end with `failed`. On exhaustion, end with `exhausted`.
