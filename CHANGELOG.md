@@ -4,6 +4,12 @@ All notable changes to the orchemist-skills pack are recorded here. The pipeline
 
 This changelog uses [Semantic Versioning](https://semver.org/) for the pipeline YAML version field.
 
+## [orchestrator-discipline] — 2026-06-15
+
+### Added — "Commit before dispatching a git/Bash-capable subagent" (working-tree-revert guard)
+
+- `skills/orchemist-run.md` § Process upgrades gains a new discipline under Seal integrity. A subagent with Bash/git tools (a `general-purpose` reviewer running `git diff origin/main...<branch>`, a verify-runner, a fix agent) can mutate the orchestrator's WORKING TREE (`git restore`/`checkout`/`stash` to inspect a clean diff) and silently revert uncommitted changes — the same "the bytes that ran are not the bytes you think" failure mode as seal integrity. Field report (a production EPIC-20 run): a seal-break edit was proven green in the working tree, a git-capable REVIEW subagent restored the tree to diff it cleanly (reverting the fix), and the committed test then hashed to the OLD sealed value — a false-green the reviewer itself flagged as "the fix doesn't exist on the branch". Mitigation: commit (or self-`stash`) uncommitted work BEFORE dispatching a git/Bash subagent; COMMAND-VERIFY `git show HEAD:<file> | sha256sum` after; prefer the read-only adversary subagent type for pure review.
+
 ## [comic-strip-pipeline 0.1.1] — 2026-06-14
 
 ### Fixed — `orch validate` clean for `pipelines/comic-strip-pipeline.yaml`
