@@ -201,6 +201,7 @@ ${spec.plan}
 ## Decisive checks
 - Does the approach actually fix the issue, end-to-end? Any path it misses?
 - SEAL IMPACT: does it touch a byte-locked / SHA-pinned / HARD-NO surface unexpectedly? Is any seal-break genuinely anticipated + named (vs a surprise)?
+- NIGHTLY SEAL FOOTPRINT (the wave blind spot — per-lane suites do NOT run the full nightly/aggregate gate): if this lane adds a CANONICAL FIELD to a shared type, a new CROSS-PACKAGE IMPORTER, or a NEW TEST FILE, enumerate the NIGHTLY/aggregate seal pins it bumps — count / keyof-set-equality pins (a field-count or keyof probe) AND RECURSIVE importer/dir allowlists (which usually glob \`__tests__/\` too) — NOT just this lane's own verify script. Such a pin lands GREEN per-lane but RED on the post-merge full-suite. Name each nightly pin to re-baseline (+ the exact delta), or confirm none.
 - Is the VALIDATION right — a focused test where locally testable, or honest prod-validation where deploy/cloud-side?
 - Scope: does it edit ONLY its files (file-disjoint from sibling lanes)? ${lane.reviewFocus || ''}
 
@@ -250,7 +251,7 @@ suite = ${impl.suite || '(none)'} · files = ${(impl.files || []).join(', ') || 
 ## Verify — the durable gates
 1. **The fix is correct + complete** per the issue. ${lane.reviewFocus || ''}
 2. **Scope:** \`git diff --stat ${base}...origin/${lane.branch}\` touches ONLY this lane's intended files — no sibling-lane file, no middleware, no unrelated change.
-3. **Seals:** unrelated pins intact; any seal-break is the ANTICIPATED/audited one (anti-mask — only the named pins changed, byte-correct, the old pin was the thing being corrected, not an accommodation).
+3. **Seals:** unrelated pins intact; any seal-break is the ANTICIPATED/audited one (anti-mask — only the named pins changed, byte-correct, the old pin was the thing being corrected, not an accommodation). NIGHTLY FOOTPRINT: if the lane added a shared-type field / cross-package importer / new test file, the per-lane suite does NOT run the full nightly — confirm the nightly count/keyof + RECURSIVE importer-allowlist pins are accounted for (a green per-lane suite can still RED the post-merge full-suite).
 4. **The focused test genuinely proves the fix** (not tautological); re-run the touched-area checks read-only. Distinguish a PRE-EXISTING red (also red on ${base}) from a NEW regression.
 
 Return the StructuredOutput: verdict, blockers (file:line + why), majors, notes. REQUEST_CHANGES on any real fix-gap, scope breach, or seal regression.`
