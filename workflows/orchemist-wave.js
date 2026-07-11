@@ -1,11 +1,11 @@
 export const meta = {
   name: 'orchemist-wave',
   description:
-    'Parallel "wave" orchestrator for Orchemist: fan N independent, file-disjoint lanes through a per-lane pipeline — mode:"refactor" runs implement → independent opus review; mode:"maintenance" runs the maintenance pipeline per lane (spec → opus spec-adversary → implement+focused-test → independent opus review). Per-lane lockstep, each lane sealed in its own git worktree. Produces reviewed, pushed branches + per-lane merge-readiness verdicts. Does NOT merge — the merge-coordination (branch-protection toggle + squash-merge + composition full-suite) stays a deliberate, outward-facing operator step.',
+    'Parallel "wave" orchestrator for Orchemist: fan N independent, file-disjoint lanes through a per-lane pipeline — mode:"refactor" runs implement → independent opus review; mode:"maintenance" runs the maintenance pipeline per lane (spec → opus spec-adversary → implement+focused-test → independent opus review); mode:"codemod" runs a behavior-preserving lint/codemod cleanup WITH the same spec + opus spec-adversary planning gate (spec → opus spec-adversary → codemod-implement → independent opus review, no new test). Per-lane lockstep, each lane sealed in its own git worktree. Produces reviewed, pushed branches + per-lane merge-readiness verdicts. Does NOT merge — the merge-coordination (branch-protection toggle + squash-merge + composition full-suite) stays a deliberate, outward-facing operator step.',
   whenToUse:
-    'When several file-DISJOINT lanes are ready at once. mode:"refactor" (default) — behavior-preserving changes (a god-module decomposition, a mechanical codemod); each lane needs an immutable contract (a surface/contract test + the full suite). mode:"maintenance" — a batch of independent bug/infra/CI/data fixes; each lane runs the maintenance pipeline (spec → opus adversary → implement + a FOCUSED test → opus review), the right-sized flow that adds behavior + tests (NOT behavior-preserving). Rule of thumb: serialize lanes WITHIN one module (same files), parallelize ACROSS modules (disjoint dirs compose cleanly).',
+    'When several file-DISJOINT lanes are ready at once. mode:"refactor" (default) — behavior-preserving changes (a god-module decomposition, a mechanical codemod); each lane needs an immutable contract (a surface/contract test + the full suite). mode:"maintenance" — a batch of independent bug/infra/CI/data fixes; each lane runs the maintenance pipeline (spec → opus adversary → implement + a FOCUSED test → opus review), the right-sized flow that adds behavior + tests (NOT behavior-preserving). mode:"codemod" — the middle ground between refactor and maintenance: a behavior-preserving lint/codemod cleanup (e.g. driving a per-package bulk-suppression baseline to zero) that still wants the spec + opus-adversary planning gate but adds NO behavior and NO new test. Rule of thumb: serialize lanes WITHIN one module (same files), parallelize ACROSS modules (disjoint dirs compose cleanly).',
   phases: [
-    { title: 'Spec', detail: 'maintenance mode only — spec + opus spec-adversary per lane (the pre-implement quality gate)', model: 'opus' },
+    { title: 'Spec', detail: 'maintenance + codemod modes — spec + opus spec-adversary per lane (the pre-implement quality gate)', model: 'opus' },
     { title: 'Implement', detail: 'one orchemist-implementer (opus) per lane, sealed in its own git worktree', model: 'opus' },
     { title: 'Review', detail: 'one independent opus reviewer per lane — verify, do not trust', model: 'opus' },
   ],
@@ -14,7 +14,7 @@ export const meta = {
 // ─────────────────────────────────────────────────────────────────────────────
 // orchemist-wave — the parallel fan-out we run by hand, encoded deterministically.
 //
-// TWO modes, same skeleton (pipeline() = per-lane lockstep, no barrier between
+// THREE modes, same skeleton (pipeline() = per-lane lockstep, no barrier between
 // lanes; each lane sealed in its own git worktree so concurrent lanes never
 // collide on the git index; the implementer pushes its branch, the reviewer
 // fetches + diffs it):
@@ -27,6 +27,14 @@ export const meta = {
 //     spec_adversary is the key quality gate for prod-affecting maintenance work;
 //     it does ONE bounded revise round. Lanes ADD behavior + tests (not
 //     behavior-preserving), so there is no surface-diff/facade invariant.
+//   • mode:"codemod"    — the middle ground: maintenance's spec → spec_adversary(opus)
+//     planning gate + refactor's behavior-preserving bar. Each lane runs
+//     spec → spec_adversary(opus) → codemod-implement → review(opus) for a
+//     behavior-preserving lint/codemod cleanup (e.g. driving a per-package
+//     bulk-suppression baseline to zero). Behavior 100% UNCHANGED, NO new
+//     behavior, NO new test; the reviewer's durable gate is that the target
+//     suppression file SHRANK (fix-then-`eslint --prune-suppressions`), not a
+//     focused test.
 //
 // WHY the merge is NOT here: toggling branch protection + squash-merging to a
 // shared default branch + the post-merge composition suite are outward-facing and
@@ -35,7 +43,7 @@ export const meta = {
 //
 // ── args contract ────────────────────────────────────────────────────────────
 //   args = {
-//     mode:          "maintenance",                // "refactor" (default) | "maintenance"
+//     mode:          "maintenance",                // "refactor" (default) | "maintenance" | "codemod"
 //     repo:          "ToscanAI/value-investing",
 //     base:          "main",
 //     suiteCmd:      "pnpm --filter @rule1/web typecheck",  // the per-lane suite/gate
@@ -48,6 +56,8 @@ export const meta = {
 //         files:       "the exact files this lane may edit",
 //         implement:   "the lane-specific change",
 //         reviewFocus: "what the spec-adversary + reviewer must scrutinize",
+//         suppressionFile: "packages/db/.eslint-suppressions.json", // codemod mode: EFFECTIVELY REQUIRED — the bulk-suppression baseline the lane must shrink (the reviewer's count-gate is disarmed without it)
+//         residual:    "none",                      // codemod mode OPTIONAL: pre-declared protected suppression entries that MAY remain (+ a one-line load-bearing rationale each); "none"/empty ⇒ drive the file to zero (or delete it)
 //       },
 //       ...
 //     ],
@@ -62,16 +72,18 @@ if (lanes.length === 0) {
   return { ready: false, lanes: [], note: 'no lanes provided' }
 }
 
-const mode = A.mode === 'maintenance' ? 'maintenance' : 'refactor'
+const mode = A.mode === 'maintenance' ? 'maintenance' : A.mode === 'codemod' ? 'codemod' : 'refactor'
 const repo = A.repo || '(repo unset)'
 const base = A.base || 'main'
-const suiteCmd = A.suiteCmd || (mode === 'maintenance' ? 'the repo typecheck/build/lint gate' : 'python3 -m pytest -q')
+const suiteCmd = A.suiteCmd || (mode === 'maintenance' ? 'the repo typecheck/build/lint gate' : mode === 'codemod' ? 'the repo lint + typecheck + full-suite gate' : 'python3 -m pytest -q')
 const expectedSuite = A.expectedSuite || '(unspecified — match the pre-wave green baseline)'
 const facadeTest = A.facadeTest || ''
 const invariant =
   A.invariant ||
   (mode === 'maintenance'
     ? 'Maintenance/infra/data fix — you DO add behavior + a FOCUSED test (this is NOT a behavior-preserving refactor). Keep the change MINIMAL + additive; edit ONLY the planned files. Preserve every UNRELATED seal pin; an explicitly-anticipated seal-break is an AUDITED re-baseline — change only the named pins, byte-correct, never an accommodation. Validate with a focused unit/e2e test when locally testable, else PROD-VALIDATION. Do NOT hand-edit unrelated tests. middleware HARD-NO.'
+    : mode === 'codemod'
+    ? 'Behavior-preserving codemod/lint cleanup — behavior 100% UNCHANGED; NO new behavior, NO new test. Each fix is EITHER auto-fixable-style (`eslint --fix`) OR an inline `// eslint-disable-next-line <rule> -- <reason>` with a REAL one-line rationale for a genuinely load-bearing case (never a blanket re-suppress). **Behavior-preserving boundary:** type-only narrowing that leaves the runtime path unchanged (a non-null assertion `arr[i]!`, an `as`-narrowing, a type guard that does NOT alter emitted control flow) IS the behavior-preserving path and is PERMITTED; any fix that changes a runtime-observable path (introducing a `?.` short-circuit, a guard/throw/early-return, a changed value) must instead be a pre-declared `residual` with a rationale, OR be routed OUT of the codemod lane into a maintenance lane. The public surface + every caller import path stay byte-identical. Do NOT modify tests EXCEPT to drop a now-unnecessary suppression. Preserve every UNRELATED seal pin. Edit ONLY the planned files. middleware HARD-NO.'
     : 'Behavior 100% unchanged; the public surface and every caller import path stay byte-identical; do NOT modify any tests.')
 
 const IMPL_SCHEMA = {
@@ -159,9 +171,12 @@ suite = ${impl.suite || '(none)'} · files = ${(impl.files || []).join(', ') || 
 Return the StructuredOutput: verdict, blockers (numbered, file:line + why), majors, surface_diff_clean (bool), notes. REQUEST_CHANGES on any blocker or any real surface regression.`
 }
 
-// ── maintenance-mode prompts (the coding-pipeline-maintenance flow per lane) ──
+// ── maintenance/codemod-mode prompts (shared spec trio + per-mode implement/review) ──
+// laneKind is reached ONLY by codemod + maintenance (refactor never calls the trio);
+// with mode==='maintenance' it is the literal 'bug/infra/data fix' the trio always used.
+const laneKind = mode === 'codemod' ? 'behavior-preserving codemod/lint cleanup' : 'bug/infra/data fix'
 function specPrompt(lane) {
-  return `You are the SPEC agent for maintenance-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Produce a FOCUSED implementation plan for this bug/infra/data fix (WHAT + HOW). READ-ONLY — no code edits.
+  return `You are the SPEC agent for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Produce a FOCUSED implementation plan for this ${laneKind} (WHAT + HOW). READ-ONLY — no code edits.
 
 ## The change
 ${lane.implement}
@@ -169,13 +184,13 @@ ${lane.implement}
 ## Files this lane may touch
 ${lane.files || '(infer from the change; keep it minimal + file-disjoint from sibling lanes)'}
 
-Recon the area-of-change in the repo, then plan: the EXACT files to edit, the approach, the SEAL SURFACE to AVOID (verify-scripts/SHA-pins near the change — or, if a seal-break is genuinely required, name the exact pin to re-baseline and why it's anticipated), and the VALIDATION plan: a FOCUSED unit/e2e test if locally testable, else the concrete PROD-VALIDATION steps. Do NOT propose a heavyweight sealed verify-script.
+Recon the area-of-change in the repo, then plan: the EXACT files to edit, the approach, the SEAL SURFACE to AVOID (verify-scripts/SHA-pins near the change — or, if a seal-break is genuinely required, name the exact pin to re-baseline and why it's anticipated), and the VALIDATION plan: ${mode === 'codemod' ? 'lint+typecheck+suite stay GREEN AND the target bulk-suppression file shrinks to ONLY the pre-declared protected residual (name the residual entries you keep + why each is load-bearing) — no new test.' : 'a FOCUSED unit/e2e test if locally testable, else the concrete PROD-VALIDATION steps.'} Do NOT propose a heavyweight sealed verify-script.
 
 Return the StructuredOutput: { plan: <the full plan>, files: [...], validation: <focused-test (which) | prod-validation steps> }.`
 }
 
 function specRevisePrompt(lane, prevPlan, verdict) {
-  return `You are the SPEC agent REVISING the plan for maintenance-wave lane "${lane.id}" (issue #${lane.issue}). An independent opus adversary found problems. Apply the VERBATIM fixes; keep everything else stable. READ-ONLY.
+  return `You are the SPEC agent REVISING the plan for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}). An independent opus adversary found problems. Apply the VERBATIM fixes; keep everything else stable. READ-ONLY.
 
 ## The change
 ${lane.implement}
@@ -190,7 +205,7 @@ Return the StructuredOutput: { plan, files, validation } — the corrected plan.
 }
 
 function specAdversaryPrompt(lane, spec) {
-  return `You are the SPEC ADVERSARY (opus) for maintenance-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Independently pressure-test the fix APPROACH for correctness, safety, timing, seal-impact, and missed edge cases — the key quality gate for prod-affecting maintenance work. READ-ONLY; verify against the REAL code.
+  return `You are the SPEC ADVERSARY (opus) for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Independently pressure-test the fix APPROACH for correctness, safety, timing, seal-impact, and missed edge cases — the key quality gate for ${mode === 'codemod' ? 'behavior-preserving cleanup work' : 'prod-affecting maintenance work'}. READ-ONLY; verify against the REAL code.
 
 ## The change
 ${lane.implement}
@@ -199,9 +214,9 @@ ${lane.implement}
 ${spec.plan}
 
 ## Decisive checks
-- Does the approach actually fix the issue, end-to-end? Any path it misses?
+- ${mode === 'codemod' ? 'Does the plan PRESERVE behavior AND drive the target bulk-suppression file to the declared residual? Is each fix auto-fixable-style (`eslint --fix`) OR an inline `// eslint-disable-next-line <rule> -- <reason>` with a real load-bearing rationale (not a blanket re-suppress)?' : 'Does the approach actually fix the issue, end-to-end? Any path it misses?'}
 - SEAL IMPACT: does it touch a byte-locked / SHA-pinned / HARD-NO surface unexpectedly? Is any seal-break genuinely anticipated + named (vs a surprise)?
-- Is the VALIDATION right — a focused test where locally testable, or honest prod-validation where deploy/cloud-side?
+- ${mode === 'codemod' ? 'Is the VALIDATION right — lint/typecheck/suite GREEN AND the suppression file shrank to the declared residual (count N → residual), not merely lint exit 0? No new test?' : 'Is the VALIDATION right — a focused test where locally testable, or honest prod-validation where deploy/cloud-side?'}
 - Scope: does it edit ONLY its files (file-disjoint from sibling lanes)? ${lane.reviewFocus || ''}
 
 Name BLOCKER / MAJOR / MINOR with file:line + a fix. Return the StructuredOutput: { verdict: APPROVE|REQUEST_CHANGES, blockers: [...], majors: [...], notes }.`
@@ -256,7 +271,58 @@ suite = ${impl.suite || '(none)'} · files = ${(impl.files || []).join(', ') || 
 Return the StructuredOutput: verdict, blockers (file:line + why), majors, notes. REQUEST_CHANGES on any real fix-gap, scope breach, or seal regression.`
 }
 
-log(`orchemist-wave [${mode}]: ${lanes.length} lane(s) off ${repo}@${base} — ${mode === 'maintenance' ? 'spec → opus adversary → implement → opus review' : 'implement (opus, worktree) → opus review'}, per-lane lockstep. Merge stays an operator step.`)
+// ── codemod-mode prompts (behavior-preserving lint/codemod cleanup, no new test) ──
+function codemodImplementPrompt(lane, spec) {
+  return `You are the IMPLEMENTER for codemod-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. This is a BEHAVIOR-PRESERVING codemod/lint cleanup — behavior 100% unchanged, NO new behavior, NO new test.
+
+## Sealed worktree
+You are in your OWN fresh git worktree. Work ONLY here.
+1. \`git fetch origin --quiet\` then \`git checkout -b ${lane.branch} origin/${base}\`.
+2. If a JS/TS repo: \`pnpm install --prefer-offline\` (a worktree has no node_modules; warm store → fast). Run every check the way the suite command shows so it resolves THIS worktree.
+
+## The change
+${lane.implement}
+
+## The approved plan (follow it)
+${spec.plan}
+
+## Files you may edit (ONLY these)
+${lane.files || '(per the plan — minimal + file-disjoint from sibling lanes)'}
+
+## Invariant — non-negotiable
+${invariant}
+
+## Validate — ALL green before you push
+1. The gate: \`${suiteCmd}\` (lint + typecheck + full suite) GREEN (expect: ${expectedSuite}).
+2. The target bulk-suppression file \`${lane.suppressionFile || '(the baseline named in the plan)'}\` reduced to ONLY the declared residual \`${lane.residual || '(none — drive it to zero / delete if empty)'}\`. **Shrink MECHANISM:** fix the violation, THEN run \`eslint --prune-suppressions\` — its safety property (a pruned entry that still lints GREEN ⇒ the violation is genuinely gone) is the whole point. FORBID bare-deletion-of-entries-without-fix. NOT merely lint exit 0 — lint/typecheck MUST stay GREEN AFTER the prune. A deleted suppression file counts as zero residual. Report the before→after count.
+3. Public surface + caller import paths byte-identical; tests untouched EXCEPT dropping a now-unnecessary suppression; unrelated seal pins intact.
+
+## Commit & push (NO PR — operator merges)
+Stage ONLY your intended files, commit ("Refs #${lane.issue}"), \`git push -u origin ${lane.branch}\`. Confirm local HEAD == pushed.
+
+Return the StructuredOutput: status ('pushed' only if green + pushed; else 'blocked'), pushed_sha, suite (the result line), files, notes (put the "N → residual" suppression count line in notes; you may add suppression_before/suppression_after; plus seal-breaks, deviations, BLOCKED reasons). If you cannot get green, status='blocked', do NOT push, explain in notes.`
+}
+
+function codemodReviewPrompt(lane, impl) {
+  return `You are an INDEPENDENT opus reviewer for codemod-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. This was a BEHAVIOR-PRESERVING codemod/lint cleanup (no new behavior, no new test). Verdict: APPROVE or REQUEST_CHANGES. Be adversarial — VERIFY, do not trust the implementer.
+
+## Read-only mandate
+Inspect branch \`${lane.branch}\` @ \`${impl.pushed_sha || '(see origin)'}\`, forked from \`${base}\`. Use \`git fetch origin\`, \`git diff ${base}...origin/${lane.branch}\`, \`git show\`, read files, read-only checks. Do NOT write/edit/commit/stash/restore/push.
+
+## Implementer claimed (verify, don't trust)
+suite = ${impl.suite || '(none)'} · files = ${(impl.files || []).join(', ') || '(unspecified)'} · notes = ${impl.notes || '(none)'}
+
+## Verify — the durable gates
+1. **The gate is GREEN:** verify the implementer's \`${suiteCmd}\` claim (expect ${expectedSuite}); re-run the touched-area checks read-only. Distinguish a PRE-EXISTING red (also red on ${base}) from a NEW regression. The suppression file may only shrink BECAUSE violations were genuinely fixed — proven by lint/typecheck still GREEN after prune — never by bare deletion.
+2. **Behavior-preserving:** AST/byte-check no logic change; each disable is auto-fix-style OR carries a real load-bearing \`-- <reason>\` (spot-check the rationales; reject a blanket re-suppress).
+3. **Suppression shrank** — INDEPENDENTLY identify + count the target file \`${lane.suppressionFile || '(the baseline named in the plan)'}\` on \`origin/${lane.branch}\` vs \`${base}\`: it dropped from N to the declared residual \`${lane.residual || '(none — drive it to zero / delete if empty)'}\` — via fix-then-\`eslint --prune-suppressions\`, NOT by bare deletion, NOT merely lint exit 0; a deleted suppression file counts as zero residual. REQUEST_CHANGES if you cannot identify + count the file independently on base vs branch (do NOT fall back to trusting the implementer).
+4. **Scope:** \`git diff --stat ${base}...origin/${lane.branch}\` touches ONLY this lane's planned files; tests touched ONLY to drop a now-unnecessary suppression; no middleware/sibling-lane/unrelated change.
+5. **Seals:** unrelated pins intact; any anticipated seal-break is the audited/named one.
+
+Return the StructuredOutput: verdict, blockers (file:line + why), majors, notes. REQUEST_CHANGES on any behavior change, an un-shrunk file, a bare-deletion, a RED gate, or a bogus rationale.`
+}
+
+log(`orchemist-wave [${mode}]: ${lanes.length} lane(s) off ${repo}@${base} — ${mode === 'maintenance' ? 'spec → opus adversary → implement → opus review' : mode === 'codemod' ? 'spec → opus adversary → codemod-implement → opus review' : 'implement (opus, worktree) → opus review'}, per-lane lockstep. Merge stays an operator step.`)
 
 // Shared: turn a (lane, impl) into a reviewed result, or a blocked record.
 function blockedRecord(lane, impl, reason) {
@@ -302,6 +368,33 @@ if (mode === 'maintenance') {
     async ({ lane, impl }) => {
       if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'implement did not reach pushed state' : 'spec or implement returned null')
       const v = await agent(maintReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'opus', schema: VERDICT_SCHEMA })
+      return reviewedRecord(lane, impl, v)
+    },
+  )
+} else if (mode === 'codemod') {
+  // Per lane: spec + opus spec-adversary (one bounded revise) → codemod-implement → opus review.
+  results = await pipeline(
+    lanes,
+    async (lane) => {
+      let spec = await agent(specPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA })
+      if (!spec) return { lane, spec: null }
+      for (let round = 0; round < 2; round++) {
+        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'opus', schema: VERDICT_SCHEMA })
+        if (!v || v.verdict === 'APPROVE') break
+        if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds with the adversary notes folded in.`); break }
+        const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA })
+        if (revised) spec = revised
+      }
+      return { lane, spec }
+    },
+    async ({ lane, spec }) => {
+      if (!spec) return { lane, impl: null }
+      const impl = await agent(codemodImplementPrompt(lane, spec), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA })
+      return { lane, impl }
+    },
+    async ({ lane, impl }) => {
+      if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'implement did not reach pushed state' : 'spec or implement returned null')
+      const v = await agent(codemodReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'opus', schema: VERDICT_SCHEMA })
       return reviewedRecord(lane, impl, v)
     },
   )
