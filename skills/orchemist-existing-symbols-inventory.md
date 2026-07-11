@@ -73,6 +73,10 @@ When the issue rebuilds or restructures a component (design change, markup re-la
 
 GROUNDING: an EPIC-20 child missed a verify script in §AFFECTED and then discovered TWO jsdom RTL regressions SERIALLY at pre-push (one fix round each) — both were companions the verify scripts grepped but never ran. Enumerating them in Phase 0 collapses that to a single in-band reconciliation.
 
+### Apply-then-relint (lint-delta probe — throwaway worktree; the primary tree stays read-only) — #30
+
+When the fix is lint-affecting AND its shape is KNOWABLE at recon (enabling a lint rule / compiler flag, or a mechanical transform — the M17 `noUncheckedIndexedAccess` case), measure the post-fix lint delta in an ISOLATED THROWAWAY git worktree: `git worktree add <tmp-path> <HEAD>` → apply the candidate change THERE → run the FULL linter THERE → capture the new + removed findings → `git worktree remove --force <tmp-path>`, and report that delta as first-class recon scope. NEVER `git stash` and NEVER edit the primary working tree (the [[feedback_commit_before_git_subagent]] primary-tree-revert trap). If the fix is NOT lint-affecting, OR its shape is not knowable until SPEC/IMPLEMENT (do NOT force a probe on an unknown fix), record the graceful token `(fix not lint-affecting, or fix shape not knowable at recon — no relint here)`.
+
 ## Output
 
 Write your inventory to `{{output_dir}}/existing_symbols.md`. Use this exact section structure (so downstream phases have stable anchors):
@@ -111,6 +115,18 @@ For every helper in §2 (project shared libraries) whose body contains a multi-b
 Populate ONLY when the issue is a design/structure change to a component (else write `(empty — not a component design/structure change)`). One row per affected verify script: the verify-script path → the `*.test.ts(x)` companions it PINS (grep-derived) → the test config/project each companion runs in (no-DB subset / fixture-seeded / default jsdom). Then a `§AFFECTED (auto-derived):` line listing the grep-derived nightly/verify set (scripts referencing the touched files ∪ scripts pinning the companions). IMPLEMENT must reconcile every listed companion IN-BAND; the full-matrix acceptance step runs every listed config.
 
 <rows per the format above, OR `(empty — not a component design/structure change)`>
+
+## §4b. Seal-sweep → per-file pin-mechanism disposition (SHA / path / signature-shape / workflow-gating; 2026-07-11)
+
+Populate when the change is near a sealed surface — ANY byte-lock / SHA-pin / HARD-NO seal mechanism (broader than §4a's RTL-companion scope). Else write the graceful stub. Repo-agnostic: if the repo has no verify/seal scripts, write `(no seal/verify scripts in this repo)`. Sweep, per touched file: (i) symbol-grep the verify/nightly scripts that reference the file, (ii) whole-file SHA / `EXPECTED_*_SHA` / `SEAL_SHA256` pins, (iii) path / immutable pins, (iv) signature-SHAPE single-line-grep pins, (v) `.github/workflows` gating cross-reference. Then one row per touched file:
+
+| touched-file | pin-mechanism | gated? (which script / workflow) | disposition |
+|---|---|---|---|
+| the file the fix edits | whole-file SHA / `EXPECTED_*_SHA` / `SEAL_SHA256`, path / immutable pin, signature-SHAPE single-line-grep pin, or `.github/workflows` gating | the verify / nightly script or workflow that enforces it (grep-derived) | FIX-in-place vs ESCALATE |
+
+`FIX-in-place` only when the change is inside the pinned surface AND its pin can be re-baselined IN-BAND (e.g. regenerate the SHA in the same PR); otherwise `ESCALATE` (the seal must not be silently broken). This §4b disposition is a DIFFERENT schema from §4a's verify-script → test-file → test-config table — keep the two sibling subsections distinct.
+
+<rows per the table above, OR `(empty — change not near a sealed surface)`>
 
 ## 5. Consume-vs-author guidance (sub-check 7d enforcement)
 
@@ -204,6 +220,9 @@ After the subagent returns:
      (empty — phase exhausted)
 
      ## §4a. Affected verify scripts → pinned RTL/unit companions + test config
+     (empty — phase exhausted)
+
+     ## §4b. Seal-sweep → per-file pin-mechanism disposition
      (empty — phase exhausted)
 
      ## 5. Consume-vs-author guidance (sub-check 7d enforcement)

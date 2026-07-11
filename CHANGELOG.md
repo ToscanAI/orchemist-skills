@@ -4,6 +4,15 @@ All notable changes to the orchemist-skills pack are recorded here. The pipeline
 
 This changelog uses [Semantic Versioning](https://semver.org/) for the pipeline YAML version field.
 
+## [recon-seal-sweep + pr-autoclose-guard 1.1.0] — 2026-07-11
+
+### Added — harden the pack's recon + PR-open discipline (M17 #1187 retro)
+
+- **#29 seal-sweep** — the maintenance pipeline's Phase-0 recon clause (2) (`pipelines/coding-pipeline-maintenance.yaml:63`) is expanded from a one-line seal mention into a per-touched-file SEAL-SWEEP: symbol-grep verify/nightly scripts, whole-file SHA / `EXPECTED_*_SHA` / `SEAL_SHA256` pins, path/immutable pins, signature-SHAPE single-line-grep pins, and `.github/workflows` gating — each guarding script gets a gated?/FIX-in-place-vs-ESCALATE disposition (graceful `(no seal/verify scripts in this repo)` when the repo has none). Canonicalised as a new `## §4b` disposition table in `skills/orchemist-existing-symbols-inventory.md` (a sibling of §4a, distinct schema) plus its failure-case empty-stub. standard.yaml Phase-0 seal-sweep DEFERRED (no existing mention to expand).
+- **#30 apply-then-relint** — new Phase-0 clause (5) (same yaml + a mirror `###` paragraph in the skill-md): when a fix is lint-affecting AND recon-knowable (a lint rule / compiler flag flip, or a mechanical transform — the M17 `noUncheckedIndexedAccess` case), measure the post-fix lint delta in an ISOLATED THROWAWAY `git worktree` (`git worktree add` → apply → relint → `git worktree remove --force`) and report new/removed findings as first-class recon scope. NEVER `git stash` / edit the primary tree (the working-tree-revert trap); the Phase-0 header `Read-only.` gains a carve-out for the disposable probe. Graceful token when not applicable.
+- **#31 PR auto-close guard** — `workflows/orchemist-wave.js:333`'s operator MERGE-WAVE instruction gains an UMBRELLA GUARD: when 2+ lanes share one umbrella issue number, non-final sub-PRs use a parenthesis-safe `fix(#<umbrella>):` subject and keep their squash/PR body EMPTY of any `(clos|fix|resolv)…#<umbrella>`; only the final lane carries `Closes #<umbrella>`; close the umbrella if it stays open after all sub-lanes merge. Shorter caveats added at `skills/orchemist-run.md:79` and a `coding-pipeline-maintenance.yaml` trailing comment (the single-issue path).
+- **Version** — `pipelines/coding-pipeline-maintenance.yaml :: version` `1.0.0` → `1.1.0` (additive Phase-0 recon guidance = MINOR, structural). Prose/prompt-only pack change — no `package.json` distribution release (mirrors the `[orchestrator-discipline]` process-only precedent). Render-smoke stays green (52 passed).
+
 ## [orchestrator-discipline] — 2026-06-15
 
 ### Added — "Commit before dispatching a git/Bash-capable subagent" (working-tree-revert guard)
