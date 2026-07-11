@@ -64,7 +64,14 @@ export const meta = {
 //   }
 // ─────────────────────────────────────────────────────────────────────────────
 
-const A = args || {}
+// `args` may arrive as a JSON STRING (the Workflow harness stringifies args on
+// the persisted/{name} path) or as a plain object — tolerate BOTH so the wave is
+// callable with lanes either way. A string that fails to parse degrades to the
+// empty-lanes no-op below rather than throwing.
+let A = args || {}
+if (typeof A === 'string') {
+  try { A = JSON.parse(A) } catch (e) { log(`orchemist-wave: args arrived as a non-JSON string — ${e.message}`); A = {} }
+}
 const lanes = Array.isArray(A.lanes) ? A.lanes : []
 
 if (lanes.length === 0) {
