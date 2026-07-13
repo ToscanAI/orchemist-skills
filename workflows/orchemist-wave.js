@@ -1,13 +1,13 @@
 export const meta = {
   name: 'orchemist-wave',
   description:
-    'Parallel "wave" orchestrator for Orchemist: fan N independent, file-disjoint lanes through a per-lane pipeline — mode:"refactor" runs implement → independent opus review; mode:"maintenance" runs the maintenance pipeline per lane (spec → opus spec-adversary → implement+focused-test → independent opus review); mode:"codemod" runs a behavior-preserving lint/codemod cleanup WITH the same spec + opus spec-adversary planning gate (spec → opus spec-adversary → codemod-implement → independent opus review, no new test). Per-lane lockstep, each lane sealed in its own git worktree. Produces reviewed, pushed branches + per-lane merge-readiness verdicts. Does NOT merge — the merge-coordination (branch-protection toggle + squash-merge + composition full-suite) stays a deliberate, outward-facing operator step.',
+    'Parallel "wave" orchestrator for Orchemist: fan N independent, file-disjoint lanes through a per-lane pipeline — mode:"refactor" runs implement → independent fable review; mode:"maintenance" runs the maintenance pipeline per lane (spec → fable spec-adversary → implement+focused-test → independent fable review); mode:"codemod" runs a behavior-preserving lint/codemod cleanup WITH the same spec + fable spec-adversary planning gate (spec → fable spec-adversary → codemod-implement → independent fable review, no new test). Per-lane lockstep, each lane sealed in its own git worktree. Produces reviewed, pushed branches + per-lane merge-readiness verdicts. Does NOT merge — the merge-coordination (branch-protection toggle + squash-merge + composition full-suite) stays a deliberate, outward-facing operator step.',
   whenToUse:
-    'When several file-DISJOINT lanes are ready at once. mode:"refactor" (default) — behavior-preserving changes (a god-module decomposition, a mechanical codemod); each lane needs an immutable contract (a surface/contract test + the full suite). mode:"maintenance" — a batch of independent bug/infra/CI/data fixes; each lane runs the maintenance pipeline (spec → opus adversary → implement + a FOCUSED test → opus review), the right-sized flow that adds behavior + tests (NOT behavior-preserving). mode:"codemod" — the middle ground between refactor and maintenance: a behavior-preserving lint/codemod cleanup (e.g. driving a per-package bulk-suppression baseline to zero) that still wants the spec + opus-adversary planning gate but adds NO behavior and NO new test. Rule of thumb: serialize lanes WITHIN one module (same files), parallelize ACROSS modules (disjoint dirs compose cleanly).',
+    'When several file-DISJOINT lanes are ready at once. mode:"refactor" (default) — behavior-preserving changes (a god-module decomposition, a mechanical codemod); each lane needs an immutable contract (a surface/contract test + the full suite). mode:"maintenance" — a batch of independent bug/infra/CI/data fixes; each lane runs the maintenance pipeline (spec → fable adversary → implement + a FOCUSED test → fable review), the right-sized flow that adds behavior + tests (NOT behavior-preserving). mode:"codemod" — the middle ground between refactor and maintenance: a behavior-preserving lint/codemod cleanup (e.g. driving a per-package bulk-suppression baseline to zero) that still wants the spec + fable-adversary planning gate but adds NO behavior and NO new test. Rule of thumb: serialize lanes WITHIN one module (same files), parallelize ACROSS modules (disjoint dirs compose cleanly).',
   phases: [
-    { title: 'Spec', detail: 'maintenance + codemod modes — spec + opus spec-adversary per lane (the pre-implement quality gate)', model: 'opus' },
+    { title: 'Spec', detail: 'maintenance + codemod modes — spec + fable spec-adversary per lane (the pre-implement quality gate)', model: 'fable' },
     { title: 'Implement', detail: 'one orchemist-implementer (opus) per lane, sealed in its own git worktree', model: 'opus' },
-    { title: 'Review', detail: 'one independent opus reviewer per lane — verify, do not trust', model: 'opus' },
+    { title: 'Review', detail: 'one independent fable reviewer per lane — verify, do not trust', model: 'fable' },
   ],
 }
 
@@ -18,18 +18,18 @@ export const meta = {
 // lanes; each lane sealed in its own git worktree so concurrent lanes never
 // collide on the git index; the implementer pushes its branch, the reviewer
 // fetches + diffs it):
-//   • mode:"refactor"   — the proven EPIC #942 pattern: implement(opus) → opus
+//   • mode:"refactor"   — the proven EPIC #942 pattern: implement(opus) → fable
 //     review. Bar = ZERO functional change; the reviewer's durable gate is the
 //     public-surface diff (a dropped re-export passes both the contract test AND
 //     the full suite; only an explicit surface-diff catches it).
 //   • mode:"maintenance" — each lane runs the coding-pipeline-maintenance flow:
-//     spec → spec_adversary(opus) → implement(+focused test) → review(opus). The
+//     spec → spec_adversary(fable) → implement(+focused test) → review(fable). The
 //     spec_adversary is the key quality gate for prod-affecting maintenance work;
 //     it does ONE bounded revise round. Lanes ADD behavior + tests (not
 //     behavior-preserving), so there is no surface-diff/facade invariant.
-//   • mode:"codemod"    — the middle ground: maintenance's spec → spec_adversary(opus)
+//   • mode:"codemod"    — the middle ground: maintenance's spec → spec_adversary(fable)
 //     planning gate + refactor's behavior-preserving bar. Each lane runs
-//     spec → spec_adversary(opus) → codemod-implement → review(opus) for a
+//     spec → spec_adversary(fable) → codemod-implement → review(fable) for a
 //     behavior-preserving lint/codemod cleanup (e.g. driving a per-package
 //     bulk-suppression baseline to zero). Behavior 100% UNCHANGED, NO new
 //     behavior, NO new test; the reviewer's durable gate is that the target
@@ -197,7 +197,7 @@ Return the StructuredOutput: { plan: <the full plan>, files: [...], validation: 
 }
 
 function specRevisePrompt(lane, prevPlan, verdict) {
-  return `You are the SPEC agent REVISING the plan for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}). An independent opus adversary found problems. Apply the VERBATIM fixes; keep everything else stable. READ-ONLY.
+  return `You are the SPEC agent REVISING the plan for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}). An independent fable adversary found problems. Apply the VERBATIM fixes; keep everything else stable. READ-ONLY.
 
 ## The change
 ${lane.implement}
@@ -212,7 +212,7 @@ Return the StructuredOutput: { plan, files, validation } — the corrected plan.
 }
 
 function specAdversaryPrompt(lane, spec) {
-  return `You are the SPEC ADVERSARY (opus) for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Independently pressure-test the fix APPROACH for correctness, safety, timing, seal-impact, and missed edge cases — the key quality gate for ${mode === 'codemod' ? 'behavior-preserving cleanup work' : 'prod-affecting maintenance work'}. READ-ONLY; verify against the REAL code.
+  return `You are the SPEC ADVERSARY (Fable 5) for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Independently pressure-test the fix APPROACH for correctness, safety, timing, seal-impact, and missed edge cases — the key quality gate for ${mode === 'codemod' ? 'behavior-preserving cleanup work' : 'prod-affecting maintenance work'}. READ-ONLY; verify against the REAL code.
 
 ## The change
 ${lane.implement}
@@ -261,7 +261,7 @@ Return the StructuredOutput: status ('pushed' only if green + pushed; else 'bloc
 }
 
 function maintReviewPrompt(lane, impl) {
-  return `You are an INDEPENDENT opus reviewer for maintenance-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Verdict: APPROVE or REQUEST_CHANGES. Be adversarial — VERIFY, do not trust the implementer.
+  return `You are an INDEPENDENT fable reviewer for maintenance-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Verdict: APPROVE or REQUEST_CHANGES. Be adversarial — VERIFY, do not trust the implementer.
 
 ## Read-only mandate
 Inspect branch \`${lane.branch}\` @ \`${impl.pushed_sha || '(see origin)'}\`, forked from \`${base}\`. Use \`git fetch origin\`, \`git diff ${base}...origin/${lane.branch}\`, \`git show\`, read files, read-only checks. Do NOT write/edit/commit/stash/restore/push.
@@ -311,7 +311,7 @@ Return the StructuredOutput: status ('pushed' only if green + pushed; else 'bloc
 }
 
 function codemodReviewPrompt(lane, impl) {
-  return `You are an INDEPENDENT opus reviewer for codemod-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. This was a BEHAVIOR-PRESERVING codemod/lint cleanup (no new behavior, no new test). Verdict: APPROVE or REQUEST_CHANGES. Be adversarial — VERIFY, do not trust the implementer.
+  return `You are an INDEPENDENT fable reviewer for codemod-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. This was a BEHAVIOR-PRESERVING codemod/lint cleanup (no new behavior, no new test). Verdict: APPROVE or REQUEST_CHANGES. Be adversarial — VERIFY, do not trust the implementer.
 
 ## Read-only mandate
 Inspect branch \`${lane.branch}\` @ \`${impl.pushed_sha || '(see origin)'}\`, forked from \`${base}\`. Use \`git fetch origin\`, \`git diff ${base}...origin/${lane.branch}\`, \`git show\`, read files, read-only checks. Do NOT write/edit/commit/stash/restore/push.
@@ -329,7 +329,7 @@ suite = ${impl.suite || '(none)'} · files = ${(impl.files || []).join(', ') || 
 Return the StructuredOutput: verdict, blockers (file:line + why), majors, notes. REQUEST_CHANGES on any behavior change, an un-shrunk file, a bare-deletion, a RED gate, or a bogus rationale.`
 }
 
-log(`orchemist-wave [${mode}]: ${lanes.length} lane(s) off ${repo}@${base} — ${mode === 'maintenance' ? 'spec → opus adversary → implement → opus review' : mode === 'codemod' ? 'spec → opus adversary → codemod-implement → opus review' : 'implement (opus, worktree) → opus review'}, per-lane lockstep. Merge stays an operator step.`)
+log(`orchemist-wave [${mode}]: ${lanes.length} lane(s) off ${repo}@${base} — ${mode === 'maintenance' ? 'spec → fable adversary → implement → fable review' : mode === 'codemod' ? 'spec → fable adversary → codemod-implement → fable review' : 'implement (opus, worktree) → fable review'}, per-lane lockstep. Merge stays an operator step.`)
 
 // Shared: turn a (lane, impl) into a reviewed result, or a blocked record.
 function blockedRecord(lane, impl, reason) {
@@ -352,14 +352,14 @@ function reviewedRecord(lane, impl, v) {
 
 let results
 if (mode === 'maintenance') {
-  // Per lane: spec + opus spec-adversary (one bounded revise) → implement → opus review.
+  // Per lane: spec + fable spec-adversary (one bounded revise) → implement → fable review.
   results = await pipeline(
     lanes,
     async (lane) => {
       let spec = await agent(specPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA })
       if (!spec) return { lane, spec: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'opus', schema: VERDICT_SCHEMA })
+        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds with the adversary notes folded in.`); break }
         const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA })
@@ -374,19 +374,19 @@ if (mode === 'maintenance') {
     },
     async ({ lane, impl }) => {
       if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'implement did not reach pushed state' : 'spec or implement returned null')
-      const v = await agent(maintReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'opus', schema: VERDICT_SCHEMA })
+      const v = await agent(maintReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA })
       return reviewedRecord(lane, impl, v)
     },
   )
 } else if (mode === 'codemod') {
-  // Per lane: spec + opus spec-adversary (one bounded revise) → codemod-implement → opus review.
+  // Per lane: spec + fable spec-adversary (one bounded revise) → codemod-implement → fable review.
   results = await pipeline(
     lanes,
     async (lane) => {
       let spec = await agent(specPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA })
       if (!spec) return { lane, spec: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'opus', schema: VERDICT_SCHEMA })
+        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds with the adversary notes folded in.`); break }
         const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA })
@@ -401,7 +401,7 @@ if (mode === 'maintenance') {
     },
     async ({ lane, impl }) => {
       if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'implement did not reach pushed state' : 'spec or implement returned null')
-      const v = await agent(codemodReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'opus', schema: VERDICT_SCHEMA })
+      const v = await agent(codemodReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA })
       return reviewedRecord(lane, impl, v)
     },
   )
@@ -412,7 +412,7 @@ if (mode === 'maintenance') {
     (lane) => agent(refactorImplementPrompt(lane), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA }).then((impl) => ({ lane, impl })),
     ({ lane, impl }) => {
       if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'implement did not reach pushed state' : 'implementer returned null')
-      return agent(refactorReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'opus', schema: VERDICT_SCHEMA }).then((v) => reviewedRecord(lane, impl, v))
+      return agent(refactorReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA }).then((v) => reviewedRecord(lane, impl, v))
     },
   )
 }

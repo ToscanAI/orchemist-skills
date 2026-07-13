@@ -4,6 +4,15 @@ All notable changes to the orchemist-skills pack are recorded here. The pipeline
 
 This changelog uses [Semantic Versioning](https://semver.org/) for the pipeline YAML version field.
 
+## [fable-adversary-review] — 2026-07-13
+
+### Changed — adversary + review judgment gates now run on **Fable 5** (`fable`) across all pipeline types
+
+- **All adversary/review gates → `fable`.** The judgment gates previously pinned to `opus` now dispatch on **Fable 5**: `spec_adversary` (standard, maintenance), `test_adversary` (standard), `acceptance_test_adversary` (skip-spec), and `review` — including its `supervisor_model` — in every pipeline. Spec-drafting, implementation, fix, and mechanical phases are unchanged (`opus`/`sonnet` as before).
+- **`workflows/orchemist-wave.js`** — the per-lane `spec_adversary` and `review` dispatches in all three modes (`refactor` / `maintenance` / `codemod`) move `opus → fable`; the per-lane `implement` stays `opus`. Meta phases, prompt text, comments, and the startup log line updated to match.
+- **`skills/orchemist-run` / `orchemist-adversary` / `orchemist-review`** — the per-phase model table, the "JUDGMENT gates stay …" doctrine, the explicit-model re-dispatch guidance, and the two skill dispatch instructions now name `fable` for adversary/review. Rationale reframed around cross-model review: running these gates on a **different model family than the drafter** is the cross-model adversarial-review thesis the pack is built on, and Fable 5 is a capable, independent reviewer.
+- Pipeline versions bumped: standard `2.0.0 → 2.1.0`, maintenance `1.1.0 → 1.2.0`, skip-spec `1.1.0 → 1.2.0`; package `0.2.0 → 0.3.0`.
+
 ## [wave-codemod-mode] — 2026-07-11
 
 ### Added — a third `mode:"codemod"` to `workflows/orchemist-wave.js` (behavior-preserving cleanup WITH the spec+adversary gate)

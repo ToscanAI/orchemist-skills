@@ -2,7 +2,7 @@ id: coding-pipeline-standard
 name: "Coding Pipeline Standard"
 description: "10-phase coding pipeline with 3-phase spec loop: spec → behavioral → adversary. Each agent writes ONE file, eliminating the bifurcation bug where secondary artifacts (spec-behavioral.md) were never written to disk. Adversarial spec review, engine-verified behavioral validation after EVERY code change."
 author: "Toscan"
-version: "2.0.0"
+version: "2.1.0"
 category: "code"
 tags: [code, development, review, testing, pipeline]
 use_cases:
@@ -445,7 +445,7 @@ phases:
   - id: spec_adversary
     name: "Spec Adversary Review"
     description: "Adversarially review behavioral contracts AND implementation spec. Checks for vague contracts, trivial satisfaction, missing edge cases, implementation leakage, and divergence between spec and contracts."
-    model_tier: opus
+    model_tier: fable
     thinking_level: high
     max_iterations: 3
     transitions:
@@ -836,7 +836,7 @@ phases:
   - id: test_adversary
     name: "Acceptance Test Adversary Review"
     description: "Adversarially review the acceptance test artifact for structural weaknesses — over-loose regex, trivial-satisfaction gates, missing edge-case probes, internal-implementation leakage, broken anchor patterns. Applies the canonical 5-check rubric plus project sub-checks adapted for bash/jest/pytest specifics. Loop cap 4."
-    model_tier: opus
+    model_tier: fable
     thinking_level: high
     max_iterations: 4
     transitions:
@@ -1106,15 +1106,15 @@ phases:
       failed: implement
       exhausted: postmortem_review
 
-  # Phase 4: Code Review (Opus)
+  # Phase 4: Code Review (Fable 5)
   - id: review
-    name: "Opus Code Review"
-    description: "Senior code review by Opus — quality gate with APPROVE/REQUEST_CHANGES verdict"
-    model_tier: opus
+    name: "Fable Code Review"
+    description: "Senior code review by Fable 5 — quality gate with APPROVE/REQUEST_CHANGES verdict"
+    model_tier: fable
     thinking_level: high
     max_iterations: 3
     supervisor: true
-    supervisor_model: opus
+    supervisor_model: fable
     supervisor_rubric: |
       Evaluate the code review quality:
       - Did it identify real issues vs nitpicks?
@@ -1131,7 +1131,7 @@ phases:
     prompt_template: |
       [PIPELINE CONTEXT] You are executing the REVIEW phase. Your verdict determines whether the code proceeds to testing or goes back for fixes. Do not ask questions or send messages. [/PIPELINE CONTEXT]
 
-      You are a senior code reviewer (Opus-tier). Your job is to catch bugs, security issues, and design problems.
+      You are a senior code reviewer (Fable 5). Your job is to catch bugs, security issues, and design problems.
 
       ## GROUND TRUTH — The Issue This Code Must Implement
       **Title:** {config[issue_title]}
