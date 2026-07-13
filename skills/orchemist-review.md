@@ -1,6 +1,6 @@
 ---
 name: orchemist:review
-description: Phase 4 of the Orchemist coding pipeline. Senior code review (Opus-tier) on the diff between main and the feature branch. Checks correctness, security, edge cases, backward compatibility, and test coverage. Returns APPROVE, REQUEST_CHANGES, or ABORT. Delegates to a fresh general-purpose subagent with model opus so the reviewer has independent eyes on the diff. Triggers when /orchemist:review is invoked or /orchemist:run advances to the review phase.
+description: Phase 4 of the Orchemist coding pipeline. Senior code review (Fable 5) on the diff between main and the feature branch. Checks correctness, security, edge cases, backward compatibility, and test coverage. Returns APPROVE, REQUEST_CHANGES, or ABORT. Delegates to a fresh general-purpose subagent with model fable so the reviewer has independent eyes on the diff. Triggers when /orchemist:review is invoked or /orchemist:run advances to the review phase.
 ---
 
 # Code Review phase
@@ -9,13 +9,13 @@ This skill is a thin wrapper that delegates to a fresh `general-purpose` subagen
 
 ## Step 1 — Delegate to the subagent
 
-Use the `Agent` (Task) tool to spawn a `general-purpose` subagent **with `model: "opus"`** (per [[feedback_max_effort_adversary_reviewer]] — the reviewer is a critical quality gate and warrants max-effort reasoning). Pass it the following prompt (verbatim — DO NOT summarise; the GROUND TRUTH anchor and structured output format are load-bearing):
+Use the `Agent` (Task) tool to spawn a `general-purpose` subagent **with `model: "fable"`** (Fable 5) (per [[feedback_max_effort_adversary_reviewer]] — the reviewer is a critical quality gate and warrants max-effort reasoning). Pass it the following prompt (verbatim — DO NOT summarise; the GROUND TRUTH anchor and structured output format are load-bearing):
 
 ---
 
 [PIPELINE CONTEXT] You are executing the REVIEW phase. Your verdict determines whether the code proceeds to testing or goes back for fixes. Do not ask questions or send messages. [/PIPELINE CONTEXT]
 
-You are a senior code reviewer (Opus-tier). Your job is to catch bugs, security issues, and design problems.
+You are a senior code reviewer (Fable 5). Your job is to catch bugs, security issues, and design problems.
 
 ## GROUND TRUTH — The Issue This Code Must Implement
 **Title:** {{config.issue_title}}

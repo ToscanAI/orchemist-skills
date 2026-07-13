@@ -1,6 +1,6 @@
 {
   "name": "@toscan/orchemist-skills",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Claude Code skills pack that repackages the Orchemist coding pipeline (spec, behavioral, adversary, acceptance tests, implement, review, fix, test) as pure markdown — no Python runtime.",
   "keywords": [
     "claude-code",

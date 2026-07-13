@@ -12,7 +12,7 @@ description: >
   Phases: acceptance_test → acceptance_test_adversary → implement → acceptance_run → review → fix → test
   Loops: acceptance_test ↔ acceptance_test_adversary (max 3), implement ↔ acceptance_run (max 3), review ↔ fix ↔ acceptance_run (max 3)
 author: "Toscan"
-version: "1.1.0"
+version: "1.2.0"
 category: "code"
 tags: [code, development, review, testing, pipeline, skip-spec]
 use_cases:
@@ -170,7 +170,7 @@ phases:
   - id: acceptance_test_adversary
     name: "Acceptance Test Adversary"
     description: "Adversarially reviews acceptance tests for coverage gaps, trivial satisfaction, leakage of implementation details, and missing edge cases. Approves or sends back for revision (max 5 rounds)."
-    model_tier: opus
+    model_tier: fable
     thinking_level: high
     max_iterations: 5
     transitions:
@@ -444,15 +444,15 @@ phases:
       failed: implement
       exhausted: postmortem_review
 
-  # Phase 3: Code Review (Opus)
+  # Phase 3: Code Review (Fable 5)
   - id: review
-    name: "Opus Code Review"
-    description: "Senior code review by Opus — quality gate with APPROVE/REQUEST_CHANGES verdict"
-    model_tier: opus
+    name: "Fable Code Review"
+    description: "Senior code review by Fable 5 — quality gate with APPROVE/REQUEST_CHANGES verdict"
+    model_tier: fable
     thinking_level: high
     max_iterations: 3
     supervisor: true
-    supervisor_model: opus
+    supervisor_model: fable
     supervisor_rubric: |
       Evaluate the code review quality:
       - Did it identify real issues vs nitpicks?
@@ -470,7 +470,7 @@ phases:
     prompt_template: |
       [PIPELINE CONTEXT] You are executing the REVIEW phase. Your verdict determines whether the code proceeds to testing or goes back for fixes. Do not ask questions or send messages. [/PIPELINE CONTEXT]
 
-      You are a senior code reviewer (Opus-tier). Your job is to catch bugs, security issues, and design problems.
+      You are a senior code reviewer (Fable 5). Your job is to catch bugs, security issues, and design problems.
 
       ## GROUND TRUTH — The Issue This Code Must Implement
       **Title:** {config[issue_title]}
