@@ -1,0 +1,3 @@
+# Consumer registry for the quarterly retro-loop scan.
+# Format: one owner/repo per line; blank lines and #-comment lines are ignored.
+ToscanAI/value-investing

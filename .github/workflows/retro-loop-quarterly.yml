@@ -1,0 +1,24 @@
+name: retro-loop-quarterly
+
+on:
+  workflow_dispatch:
+    inputs:
+      quarter:
+        description: "Target quarter to scan, e.g. 2026-Q2 (form YYYY-Q<N>, N is 1-4)."
+        required: true
+        type: string
+  # Dispatch-only for now. Enabling the quarterly schedule below + wiring a
+  # GH_TOKEN with consumer-repo read access is a deliberate follow-up; as
+  # shipped this workflow does NOT auto-fire or open [retro] issues.
+  # schedule:
+  #   # 09:00 UTC on the 15th of Mar / Jun / Sep / Dec (the cadence months).
+  #   - cron: "0 9 15 3,6,9,12 *"
+
+jobs:
+  retro:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run quarterly retro-loop driver
+        run: bash scripts/retro-loop-quarterly.sh "${{ inputs.quarter }}"
