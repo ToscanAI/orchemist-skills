@@ -223,6 +223,7 @@ ${spec.plan}
 ## Decisive checks
 - ${mode === 'codemod' ? 'Does the plan PRESERVE behavior AND drive the target bulk-suppression file to the declared residual? Is each fix auto-fixable-style (`eslint --fix`) OR an inline `// eslint-disable-next-line <rule> -- <reason>` with a real load-bearing rationale (not a blanket re-suppress)?' : 'Does the approach actually fix the issue, end-to-end? Any path it misses?'}
 - SEAL IMPACT: does it touch a byte-locked / SHA-pinned / HARD-NO surface unexpectedly? Is any seal-break genuinely anticipated + named (vs a surprise)?
+- NIGHTLY SEAL FOOTPRINT: if the lane adds a shared-type field, a cross-package importer, or a new test / \`__tests__\` file, does the plan enumerate the NIGHTLY/AGGREGATE-only pins that footprint touches — a count·keyof / field-count / set-equality pin AND any recursive importer/dir allowlist (typically globs \`__tests__/\`) — BEYOND the lane's OWN verify script, and NAME each such pin to re-baseline? A lane green on its own suite can still land RED on the post-merge full-suite; catch it pre-merge.
 - ${mode === 'codemod' ? 'Is the VALIDATION right — lint/typecheck/suite GREEN AND the suppression file shrank to the declared residual (count N → residual), not merely lint exit 0? No new test?' : 'Is the VALIDATION right — a focused test where locally testable, or honest prod-validation where deploy/cloud-side?'}
 - Scope: does it edit ONLY its files (file-disjoint from sibling lanes)? ${lane.reviewFocus || ''}
 
@@ -272,7 +273,7 @@ suite = ${impl.suite || '(none)'} · files = ${(impl.files || []).join(', ') || 
 ## Verify — the durable gates
 1. **The fix is correct + complete** per the issue. ${lane.reviewFocus || ''}
 2. **Scope:** \`git diff --stat ${base}...origin/${lane.branch}\` touches ONLY this lane's intended files — no sibling-lane file, no middleware, no unrelated change.
-3. **Seals:** unrelated pins intact; any seal-break is the ANTICIPATED/audited one (anti-mask — only the named pins changed, byte-correct, the old pin was the thing being corrected, not an accommodation).
+3. **Seals:** unrelated pins intact; any seal-break is the ANTICIPATED/audited one (anti-mask — only the named pins changed, byte-correct, the old pin was the thing being corrected, not an accommodation). NIGHTLY FOOTPRINT: if the diff adds a shared-type field / cross-package importer / new test file, INDEPENDENTLY check whether a nightly/aggregate count·keyof pin or a recursive importer/dir allowlist should have been re-baselined and was — flag a MAJOR if an un-re-baselined nightly-only pin is left that the post-merge full-suite would fail on (a lane green on its own suite can still be RED on the aggregate gate).
 4. **The focused test genuinely proves the fix** (not tautological); re-run the touched-area checks read-only. Distinguish a PRE-EXISTING red (also red on ${base}) from a NEW regression.
 
 Return the StructuredOutput: verdict, blockers (file:line + why), majors, notes. REQUEST_CHANGES on any real fix-gap, scope breach, or seal regression.`
