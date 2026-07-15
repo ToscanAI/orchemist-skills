@@ -43,9 +43,12 @@ You have no access to implementation details. This is by design.
    | `typescript`   | `{{output_dir}}/acceptance_tests.test.ts`  | `jest` or `vitest`   |
    | `javascript`   | `{{output_dir}}/acceptance_tests.test.js`  | `jest` or `vitest`   |
    | `go`           | `{{output_dir}}/acceptance_tests_test.go`  | `go test`            |
+   | `csharp`       | `.cs` file inside a dedicated test project (see the C# note below — NOT a single `{{output_dir}}` path) | `dotnet test` (xUnit) |
    | (other / blank)| default to python                          | pytest               |
 
    The runner is whatever the orchestrator's `acceptance_run` phase calls — see `orchemist-run.md` for the per-language commands. Match its expectation.
+
+   **C# / .NET (`language == csharp`):** write xUnit tests (`[Fact]` / `[Theory]`) into a dedicated test project in the repo — convention `{{config.repo_path}}/src/<SUT-name>.Tests/` — reusing an existing `*.Tests` project if present, else creating one via `dotnet new xunit` + `dotnet add reference` to the SUT project + `dotnet sln add`. Select the SUT and test projects DETERMINISTICALLY (SUT = the project named in the issue/spec context, else the single non-test `*.csproj`; test project = the single existing `*.Tests`, else create `<SUT-name>.Tests`); if EITHER is ambiguous — multiple candidates on either side, none named — HALT with a clear BLOCKED reason rather than guess (a wrong `dotnet add reference` compiles the sealed test against the wrong or absent API). If ZERO non-test `*.csproj` candidates exist and none is named, HALT with a BLOCKED reason (`no SUT project found — csharp detected but no non-test *.csproj in repo`). Record the chosen SUT and test-project absolute paths in `state.json` (`state.csharp_sut_project`, `state.csharp_test_project`) — see the ".NET / C#" subsection in `orchemist-run.md` for the exact rule. The sealed test is that `.cs` file (its absolute path is recorded as `state.acceptance_test_file`, and its fully-qualified name — namespace + class — as `state.acceptance_test_fqn` so `acceptance_run` can `--filter` to it; absent an FQN, `acceptance_run` runs the whole test project with no `--filter`), NOT a `{{output_dir}}` loose file. Assert against the real API surface the contract names; pre-implement these tests will FAIL TO COMPILE (the SUT types do not exist yet) — that is the intended RED. The tests remain the immutable sealed contract.
 
 3. Write the test file in that language. The tests must:
    - Express behavioral contracts of the form: "when I call X with Y, it produces Z"
@@ -55,7 +58,7 @@ You have no access to implementation details. This is by design.
    - Wrong: `assert hasattr(obj, '_extract_code_quality')` / `expect(typeof obj._extract).toBe('function')`
    - Right: `assert scorer.compute(with_quality_data) > scorer.compute(without_quality_data)`
    - Each test has a clear docstring/comment stating the behavioral contract
-   - Imports come from the actual repo path `{{config.repo_path}}` (python: `sys.path.insert(0, '{{config.repo_path}}')` at top; ts/js: relative import; go: same module)
+   - Imports come from the actual repo path `{{config.repo_path}}` (python: `sys.path.insert(0, '{{config.repo_path}}')` at top; ts/js: relative import; go: same module; csharp: the test project references the SUT via `dotnet add reference`)
    - Cover: happy path, edge cases, error cases, and boundary conditions
    - Aim for 5-15 focused behavioral tests
 

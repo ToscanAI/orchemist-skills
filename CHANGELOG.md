@@ -4,6 +4,15 @@ All notable changes to the orchemist-skills pack are recorded here. The pipeline
 
 This changelog uses [Semantic Versioning](https://semver.org/) for the pipeline YAML version field.
 
+## [dotnet-acceptance-support] — 2026-07-15
+
+### Added — .NET / C# sealed-acceptance support (a `csharp` language path across the 3 acceptance skills)
+
+- **`skills/orchemist-run.md`** — config table detects `csharp` (`*.sln`/`*.csproj`) with `test_command` default `dotnet test`; a `csharp` row in the acceptance-run dispatch table; a new ".NET / C#" subsection (deterministic SUT/test-project selection with HALT-on-ambiguity; sealed-test FQN recorded as `state.acceptance_test_fqn` for `--filter`, whole-project run when absent); the generic step-5 verdict gains an explicit `csharp` override so the .NET/C# rule REPLACES `passed==total` (a `Build FAILED` can no longer false-green); Seal integrity generalized to `state.acceptance_test_file` (absolute path; defaults to the legacy `{{output_dir}}/acceptance_tests.py` when unset).
+- **`skills/orchemist-acceptance-run.md`** — the previously pytest-only Task (steps 1-6) is now a language dispatch; ONLY `csharp` routes to the new path — the pytest steps stay the unchanged "Python (pytest) / default path" (this skill is a manual fallback; js/go/ts run via `orchemist-run.md`'s per-language table, not these pytest steps). The `csharp` path runs `dotnet test`, parses and AGGREGATES every `Passed!`/`Failed!` summary line (one per TFM for multi-targeted projects; whitespace/`Duration`-tolerant match), and verdicts `success` iff build OK + `Failed==0` on every line + `Passed>0` in aggregate. A pre-implement `Build FAILED` is documented as the expected RED signal for .NET, not an infra error.
+- **`skills/orchemist-acceptance-test.md`** — a `csharp` row + prose: write xUnit tests into a dedicated `*.Tests` project referencing the SUT; tests are RED (won't compile) until implemented; the "tests are the immutable sealed contract" rule is retained.
+- **Scope** — additive, `language == csharp`-gated; python/js/go/ts behavior unchanged. `pipelines/*.yaml` untouched (separate engine consumer, out of scope). Prose/prompt-only pack change — no `package.json` release and no pipeline-YAML `version` bump (mirrors the `[orchestrator-discipline]` / `[wave-codemod-mode]` process-only precedent). Render-smoke stays green.
+
 ## [fable-adversary-review] — 2026-07-13
 
 ### Changed — adversary + review judgment gates now run on **Fable 5** (`fable`) across all pipeline types
