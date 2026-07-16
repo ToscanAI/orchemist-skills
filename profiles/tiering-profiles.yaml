@@ -1,0 +1,38 @@
+# profiles/tiering-profiles.yaml
+# Consumer-selectable per-phase model + effort tiering profiles for the Orchemist
+# CODING pipelines (standard / maintenance / skip-spec). Selected once per consumer
+# project via config.tiering_profile. NOT a pipeline file — lives OUTSIDE pipelines/
+# so tests/test_all_pipelines_render_smoke.py never parametrizes it.
+#
+# Each profile maps phase_class -> { model, effort }:
+#   phase_class : rote | interpretive | implement | gate  (declared per phase in pipelines/*.yaml)
+#   model       : haiku | sonnet | opus | fable | inherit  (inherit = the phase's own model_tier)
+#   effort      : low | medium | high | xhigh | inherit    (inherit = session default; the Agent
+#                 (Task) path has NO per-dispatch effort knob — see skills/orchemist-run.md)
+#
+# INVARIANT (enforced by tests/tiering_profiles.py::assert_gate_floor AND the
+# skills/orchemist-run.md "Tiering profiles" prose): the `gate` class MUST resolve to
+# `fable` in every profile — a judgment gate is NEVER tiered below Fable 5, whatever
+# the budget setting. A profile that violates this HARD-STOPS the run.
+version: "1.0.0"
+profiles:
+  # default = identity / passthrough: overrides NOTHING. Every phase dispatches on its
+  # own model_tier with session-inherited effort => byte-for-byte today's behavior.
+  # This is the value when a consumer selects nothing (config.tiering_profile default).
+  default:
+    rote:         { model: inherit, effort: inherit }
+    interpretive: { model: inherit, effort: inherit }
+    implement:    { model: inherit, effort: inherit }
+    gate:         { model: inherit, effort: inherit }
+  # budget-first — cheapest viable ladder; haiku FLOOR for rote; gates never tier below fable.
+  budget-first:
+    rote:         { model: haiku,  effort: low }
+    interpretive: { model: sonnet, effort: medium }
+    implement:    { model: opus,   effort: high }
+    gate:         { model: fable,  effort: xhigh }
+  # quality-first — spend on interpretation + implementation; gates at fable/xhigh.
+  quality-first:
+    rote:         { model: sonnet, effort: medium }
+    interpretive: { model: opus,   effort: high }
+    implement:    { model: opus,   effort: high }
+    gate:         { model: fable,  effort: xhigh }

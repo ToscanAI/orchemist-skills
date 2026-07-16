@@ -2,7 +2,7 @@ id: coding-pipeline-standard
 name: "Coding Pipeline Standard"
 description: "10-phase coding pipeline with 3-phase spec loop: spec → behavioral → adversary. Each agent writes ONE file, eliminating the bifurcation bug where secondary artifacts (spec-behavioral.md) were never written to disk. Adversarial spec review, engine-verified behavioral validation after EVERY code change."
 author: "Toscan"
-version: "2.1.0"
+version: "2.2.0"
 category: "code"
 tags: [code, development, review, testing, pipeline]
 use_cases:
@@ -74,6 +74,10 @@ config_schema:
       type: boolean
       default: false
       description: "POLICY FLAG (added v4.2, 2026-05-24). When false (default), Phase 0 degrades gracefully: if the existing_symbols_inventory phase exhausts retries or fails, the orchestrator falls through to SPEC with an empty/partial `existing_symbols.md` (downstream phases revert to ad-hoc grep per the v4 backward-compat short-circuit). When true, consumers signal stricter intent: SPEC + SPEC_ADVERSARY + IMPLEMENT prompts elevate the absence of a valid `existing_symbols.md` to a [BLOCKER]; the orchestrator should HALT rather than fall through. The YAML's default `transitions.exhausted: spec` honors graceful degradation; consumers who want true HALT can fork-override `transitions.exhausted: null` (terminate the run) or use the wrapper-orchestrator pattern documented in CHANGELOG v4.2. Motivation: Wave 5/6 redundancy retro in ToscanAI/value-investing (2026-05-24) measured 32 PRs / 19 days producing 13 new duplication groups — late-catch under graceful degradation is the dominant failure mode for that consumer."
+    tiering_profile:
+      type: string
+      default: "default"
+      description: "Named model+effort tiering profile from profiles/tiering-profiles.yaml (default | budget-first | quality-first, or a consumer-defined profile). 'default' reproduces this pipeline's declared per-phase model_tier with session-inherited effort (zero behavior change). The `gate` class can never resolve below `fable`. See docs/tiering-profiles.md."
 
 example_input:
   issue_title: "Sample issue title"
@@ -142,6 +146,7 @@ phases:
     name: "Existing-symbols inventory (sub-check 7d pre-flight)"
     description: "Greps the project for existing UI primitives, shared libraries, adjacent action/hook patterns, and workspace-barrel exports. Writes a sticky `existing_symbols.md` artifact read by every subsequent phase. Resolves the late-catch problem for sub-check 7d (re-implementation of existing symbol)."
     model_tier: sonnet
+    phase_class: rote
     thinking_level: medium
     max_iterations: 2
     transitions:
@@ -285,6 +290,7 @@ phases:
     name: "Implementation Spec"
     description: "Interpret the issue into an implementation plan (Section B). Does NOT write behavioral contracts — that's the behavioral agent's job."
     model_tier: sonnet
+    phase_class: interpretive
     thinking_level: high
     max_iterations: 3
     transitions:
@@ -363,6 +369,7 @@ phases:
     name: "Behavioral Contracts"
     description: "Write behavioral contracts (Section A) from the issue + implementation spec. Reads spec.md but outputs ONLY observable behavior — no implementation details."
     model_tier: sonnet
+    phase_class: interpretive
     thinking_level: high
     max_iterations: 3
     transitions:
@@ -446,6 +453,7 @@ phases:
     name: "Spec Adversary Review"
     description: "Adversarially review behavioral contracts AND implementation spec. Checks for vague contracts, trivial satisfaction, missing edge cases, implementation leakage, and divergence between spec and contracts."
     model_tier: fable
+    phase_class: gate
     thinking_level: high
     max_iterations: 3
     transitions:
@@ -589,6 +597,7 @@ phases:
     name: "Spec Exhaustion Postmortem"
     description: "When the spec loop exhausts iterations without agreement, extract unresolved findings and propose issue improvements for the next attempt."
     model_tier: sonnet
+    phase_class: interpretive
     thinking_level: medium
     transitions: {}
     prompt_template: |
@@ -631,6 +640,7 @@ phases:
     name: "Behavioral Acceptance Tests"
     description: "Write behavioral tests from contracts ONLY — never from implementation. These become immutable constraints for the implementing agent. Behavioral contracts have been adversarially reviewed before reaching this phase. Test format switches on {config[language]}: pytest (Python), jest (TypeScript/JavaScript), `go test` (Go), or bash verify-script (bash)."
     model_tier: sonnet
+    phase_class: interpretive
     thinking_level: high
     transitions:
       success: test_adversary
@@ -837,6 +847,7 @@ phases:
     name: "Acceptance Test Adversary Review"
     description: "Adversarially review the acceptance test artifact for structural weaknesses — over-loose regex, trivial-satisfaction gates, missing edge-case probes, internal-implementation leakage, broken anchor patterns. Applies the canonical 5-check rubric plus project sub-checks adapted for bash/jest/pytest specifics. Loop cap 4."
     model_tier: fable
+    phase_class: gate
     thinking_level: high
     max_iterations: 4
     transitions:
@@ -929,6 +940,7 @@ phases:
     name: "Implementation"
     description: "Write the code changes based on the spec, constrained by acceptance tests"
     model_tier: sonnet
+    phase_class: implement
     thinking_level: high
     max_iterations: 3
     transitions:
@@ -1099,6 +1111,7 @@ phases:
     name: "Acceptance Test Runner"
     description: "Engine (or orchestrator skill) executes the acceptance test directly — no agent. Dispatches per config.language: pytest for Python (acceptance_tests.py), jest for TypeScript/JavaScript (acceptance_tests.js/.ts), go test for Go (acceptance_tests_test.go), bash for shell verify-scripts (scripts/verify-<issue>.sh). Writes engine-verified results to acceptance_results.json. For non-Python languages, the orchestrator skill (orchemist-run.md) implements the per-language dispatch; the engine handler defaults to pytest only when config.language is unset or 'python'."
     task_type: acceptance_run
+    phase_class: rote  # inert: no LLM dispatch — annotation only
     max_iterations: 3
     working_dir: "{config[repo_path]}"
     transitions:
@@ -1111,6 +1124,7 @@ phases:
     name: "Fable Code Review"
     description: "Senior code review by Fable 5 — quality gate with APPROVE/REQUEST_CHANGES verdict"
     model_tier: fable
+    phase_class: gate
     thinking_level: high
     max_iterations: 3
     supervisor: true
@@ -1277,6 +1291,7 @@ phases:
     name: "Apply Review Fixes"
     description: "Address code review feedback, then re-verify behavioral contracts before re-review"
     model_tier: sonnet
+    phase_class: implement
     thinking_level: low
     max_iterations: 3
     transitions:
@@ -1338,6 +1353,7 @@ phases:
     name: "Review Loop Exhaustion Postmortem"
     description: "When the review/fix loop exhausts iterations without approval, extract persistent review findings and diagnose why fixes failed to satisfy the reviewer."
     model_tier: sonnet
+    phase_class: interpretive
     thinking_level: medium
     transitions: {}
     prompt_template: |
@@ -1386,6 +1402,7 @@ phases:
     name: "Test Verification"
     description: "Run full test suite to verify no regressions. Command resolves from config.test_command; allowed_commands lists the safelisted executables per language."
     task_type: command
+    phase_class: rote  # inert: no LLM dispatch — annotation only
     command: "{config[test_command]}"
     working_dir: "{config[repo_path]}"
     allowed_commands: ["python3", "python", "pytest", "npm", "npx", "pnpm", "yarn", "node", "jest", "vitest", "go", "bash", "sh", "make"]

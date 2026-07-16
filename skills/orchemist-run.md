@@ -15,20 +15,25 @@ Every LLM-driven phase in the pipeline MUST run as a fresh subagent invoked via 
 
 Per-phase subagent + model mapping:
 
-| Phase                          | Subagent type         | Model override |
-|--------------------------------|-----------------------|----------------|
-| `existing_symbols_inventory`   | general-purpose       | (default)      |
-| `spec`                         | general-purpose       | (default)      |
-| `behavioral`                   | general-purpose       | (default)      |
-| `spec_adversary`               | orchemist-adversary   | `fable`         |
-| `acceptance_test`              | orchemist-tester      | (default)      |
-| `implement`                    | orchemist-implementer | (default)      |
-| `review`                       | general-purpose       | `fable`         |
-| `fix`                          | general-purpose       | (default)      |
-| `acceptance_run`               | (no LLM — command)    | n/a            |
-| `test`                         | (no LLM — command)    | n/a            |
+| Phase                        | phase_class   | Subagent type         | Default model = its `model_tier`     |
+|------------------------------|---------------|-----------------------|--------------------------------------|
+| `existing_symbols_inventory` | rote          | general-purpose       | `sonnet`                             |
+| `spec`                       | interpretive  | general-purpose       | `sonnet` (std/skip) · `opus` (maint) |
+| `behavioral`                 | interpretive  | general-purpose       | `sonnet`                             |
+| `spec_adversary`             | gate          | orchemist-adversary   | `fable`                              |
+| `acceptance_test`            | interpretive  | orchemist-tester      | `sonnet`                             |
+| `acceptance_test_adversary`  | gate          | orchemist-adversary   | `fable` (skip-spec)                  |
+| `test_adversary`             | gate          | orchemist-adversary   | `fable` (standard)                   |
+| `implement`                  | implement     | orchemist-implementer | `sonnet` (std/skip) · `opus` (maint) |
+| `review`                     | gate          | general-purpose       | `fable`                              |
+| `fix`                        | implement     | general-purpose       | `sonnet` (std/skip) · `opus` (maint) |
+| `postmortem_spec`            | interpretive  | general-purpose       | `sonnet`                             |
+| `postmortem_review`          | interpretive  | general-purpose       | `sonnet`                             |
+| `acceptance_run`             | rote (inert)  | (no LLM — engine)     | n/a                                  |
+| `verify_tests_integrity`     | rote (inert)  | (no LLM — command)    | n/a                                  |
+| `test`                       | rote (inert)  | (no LLM — command)    | n/a                                  |
 
-The `fable` (Fable 5) override on `spec_adversary` and `review` reflects [[feedback_max_effort_adversary_reviewer]] — these are the critical quality gates.
+The `fable` (Fable 5) override on all gate-class phases (`spec_adversary`, `test_adversary`, `acceptance_test_adversary`, `review`) reflects [[feedback_max_effort_adversary_reviewer]] — these are the critical quality gates.
 
 **Always pass an EXPLICIT model on every `Agent` dispatch (v4.4 hardening).** Do not rely on the `(default)` rows literally — treat each `(default)` as "the orchestrator's standard working model, named explicitly." On some main-loop models a dispatch that inherits the ambient configuration dies instantly: the subagent returns 0 tokens and an immediate failure (a `400` with a `thinking.type.disabled`-style cause is the signature seen in the engine campaign on 2026-06-10). A 0-token / instant-death return is NOT a content verdict — do NOT route it as `failed` through the phase transitions. Re-dispatch the SAME phase with an explicit model (`sonnet` for the default rows; the table's `fable` for adversary/review; `haiku` only where a phase is explicitly tuned for it). If the explicit re-dispatch also dies instantly, THEN surface it as an infrastructure failure and halt — not a phase `failed`.
 
@@ -38,6 +43,52 @@ The `fable` (Fable 5) override on `spec_adversary` and `review` reflects [[feedb
 - **MECHANICAL phases MAY tier to `sonnet`.** The existing-symbols inventory (Phase 0), the RED-until-implementation re-validation, and the suite/acceptance COMMAND runs are largely rote grep/parse/run work with the same guardrails regardless of model — `sonnet` is an acceptable explicit choice for them, lowering cost and latency.
 
 This is GUIDANCE: the per-phase table above is still the source of truth for which subagent type runs each phase, and you still pass an explicit model every dispatch. Tiering only narrows the choice of explicit model for the mechanical rows; it never downgrades a judgment gate.
+
+### Tiering profiles — consumer-configurable per-phase {model, effort} (2026-07-16, #41)
+
+The per-phase model+effort is resolved through a **named tiering profile** selected once per
+consumer via `config.tiering_profile` (default `"default"`), defined in the installed registry
+`~/.claude/skills/orchemist/profiles/tiering-profiles.yaml` (fallback: the pack-repo-local
+`profiles/tiering-profiles.yaml` — same resolution rule as the pipeline files, see "Pipeline file").
+Each profile maps a phase's **`phase_class`**
+(`rote | interpretive | implement | gate`, now declared on every phase in the coding
+`pipelines/*.yaml`) to `{ model, effort }`.
+
+**Resolution — per phase, every dispatch:**
+1. `cls = phase.phase_class`.
+2. `entry = active_profile[cls]`, where `active_profile = profiles[config.tiering_profile]`.
+3. `model = entry.model`; if `entry.model == "inherit"`, fall back to the phase's own `model_tier`.
+4. `effort = entry.effort`; if `entry.effort == "inherit"`, use the session default.
+5. Dispatch the phase's subagent with the resolved **model** named explicitly (the explicit-model
+   rule above still holds — never rely on `(default)`). Apply **effort** per the effort-gap rule below.
+
+`default` resolves every class to `inherit` ⇒ each phase dispatches on its own `model_tier` with
+session-inherited effort ⇒ **zero behavior change** for any consumer that does not opt in.
+`budget-first` and `quality-first` are the shipped opt-in ladders; `budget-first` adds a **haiku**
+floor for rote phases. A consumer may add a named profile to `profiles/tiering-profiles.yaml` (or a
+copy) and select it by name — see `docs/tiering-profiles.md`.
+
+**Gate-invariant — HARD-STOP (non-negotiable).** Before the run starts, resolve the active
+profile's `gate` class against every gate-class phase. If any resolves to a model NOT in the fable
+allowlist (`{fable}`) — e.g. a consumer profile with `gate: {model: sonnet}` — **HALT the run with a
+configuration error; do NOT silently downgrade a judgment gate.** The canonical check is the pure
+function `tests/tiering_profiles.py::assert_gate_floor` (the same one the test suite enforces); this
+prose and that function are one source of truth. The profile layer sits ABOVE the existing
+"JUDGMENT gates stay `fable`" floor and can never pierce it. A phase whose `model_tier` is `fable`
+but whose `phase_class` is not `gate` is itself a configuration error — HALT, same rule.
+
+**Effort gap — honest limitation.** Per-phase `effort` is fully honored ONLY on the **Workflow
+`agent()` path** (`workflows/orchemist-wave.js`), where each dispatch passes the resolved `effort`.
+The **single-issue Agent (Task) path has NO per-dispatch effort parameter** (the Agent tool exposes
+`model`, not `effort`). On that path the orchestrator treats the profile's effort as a recommended
+**SESSION** effort: set it once via `/effort` to at least the profile's `gate` effort (`xhigh` for
+`budget-first`/`quality-first`) so the judgment gates are not under-powered; rote phases cannot be
+individually tiered DOWN in effort here. FULL per-phase effort tiering requires the Workflow path.
+Do NOT assume the Agent path applies per-phase effort.
+
+(Note: the legacy per-phase `thinking_level:` scalar in the pipeline YAMLs is unconsumed and is
+superseded by this `effort` dimension; it is retained to minimize churn and may be removed in a
+future major.)
 
 **Phase 0 (`existing_symbols_inventory`) MUST use `general-purpose`** — its prompt template instructs the subagent to write `{{output_dir}}/existing_symbols.md` to disk, and read-only subagent types (notably Claude Code's `Explore`, which has no Write/Edit tool) cannot satisfy that contract and silently break the file-write invariant every downstream phase depends on. See `skills/orchemist-existing-symbols-inventory.md` for the full prompt and the safe-default fallback. Field report: ToscanAI/orchemist-skills#9; upstream contract documented at ToscanAI/orchemist#903.
 

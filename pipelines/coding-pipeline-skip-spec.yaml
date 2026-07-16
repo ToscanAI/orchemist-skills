@@ -12,7 +12,7 @@ description: >
   Phases: acceptance_test → acceptance_test_adversary → implement → acceptance_run → review → fix → test
   Loops: acceptance_test ↔ acceptance_test_adversary (max 3), implement ↔ acceptance_run (max 3), review ↔ fix ↔ acceptance_run (max 3)
 author: "Toscan"
-version: "1.2.0"
+version: "1.3.0"
 category: "code"
 tags: [code, development, review, testing, pipeline, skip-spec]
 use_cases:
@@ -64,6 +64,10 @@ config_schema:
       type: integer
       default: 3
       description: "Max implement→acceptance_run loop iterations (set max_iterations on implement and acceptance_run phases)"
+    tiering_profile:
+      type: string
+      default: "default"
+      description: "Named model+effort tiering profile from profiles/tiering-profiles.yaml (default | budget-first | quality-first, or a consumer-defined profile). 'default' reproduces this pipeline's declared per-phase model_tier with session-inherited effort (zero behavior change). The `gate` class can never resolve below `fable`. See docs/tiering-profiles.md."
 
 example_input:
   issue_title: "Sample issue title"
@@ -88,6 +92,7 @@ phases:
     name: "Behavioral Acceptance Tests"
     description: "Write behavioral tests from contracts ONLY — never from implementation. These become immutable constraints for the implementing agent. Behavioral contracts were reviewed externally before reaching this pipeline."
     model_tier: sonnet
+    phase_class: interpretive
     thinking_level: high
     max_iterations: 5
     transitions:
@@ -171,6 +176,7 @@ phases:
     name: "Acceptance Test Adversary"
     description: "Adversarially reviews acceptance tests for coverage gaps, trivial satisfaction, leakage of implementation details, and missing edge cases. Approves or sends back for revision (max 5 rounds)."
     model_tier: fable
+    phase_class: gate
     thinking_level: high
     max_iterations: 5
     transitions:
@@ -244,6 +250,7 @@ phases:
     name: "Implementation"
     description: "Write the code changes based on the spec, constrained by acceptance tests"
     model_tier: sonnet
+    phase_class: implement
     thinking_level: high
     max_iterations: 3
     transitions:
@@ -424,6 +431,7 @@ phases:
     name: "Test Dir Integrity Check"
     description: "Verifies the agent did not modify the tests/ directory. Uses git diff against main as source of truth."
     task_type: command
+    phase_class: rote  # inert: no LLM dispatch — annotation only
     command: "git diff main -- tests/ | grep -q . && echo 'TAMPERING DETECTED: tests/ was modified on this branch' && exit 1 || echo 'tests/ integrity verified' && exit 0"
     working_dir: "{config[repo_path]}"
     allowed_commands: ["git", "grep", "echo"]
@@ -437,6 +445,7 @@ phases:
     name: "Acceptance Test Runner"
     description: "Engine executes pytest directly on acceptance_tests.py — no agent. Writes engine-verified results to acceptance_results.json."
     task_type: acceptance_run
+    phase_class: rote  # inert: no LLM dispatch — annotation only
     max_iterations: 6
     working_dir: "{config[repo_path]}"
     transitions:
@@ -449,6 +458,7 @@ phases:
     name: "Fable Code Review"
     description: "Senior code review by Fable 5 — quality gate with APPROVE/REQUEST_CHANGES verdict"
     model_tier: fable
+    phase_class: gate
     thinking_level: high
     max_iterations: 3
     supervisor: true
@@ -616,6 +626,7 @@ phases:
     name: "Apply Review Fixes"
     description: "Address code review feedback, then re-verify behavioral contracts before re-review"
     model_tier: sonnet
+    phase_class: implement
     thinking_level: low
     max_iterations: 3
     transitions:
@@ -683,6 +694,7 @@ phases:
     name: "Review Loop Exhaustion Postmortem"
     description: "When the review/fix loop exhausts iterations without approval, extract persistent review findings and diagnose why fixes failed to satisfy the reviewer."
     model_tier: sonnet
+    phase_class: interpretive
     thinking_level: medium
     transitions: {}
     prompt_template: |
@@ -731,6 +743,7 @@ phases:
     name: "Test Verification"
     description: "Run full test suite to verify no regressions"
     task_type: command
+    phase_class: rote  # inert: no LLM dispatch — annotation only
     command: "{config[test_command]}"
     working_dir: "{config[repo_path]}"
     allowed_commands: ["python3", "python", "pytest"]
