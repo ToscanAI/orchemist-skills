@@ -4,6 +4,19 @@ All notable changes to the orchemist-skills pack are recorded here. The pipeline
 
 This changelog uses [Semantic Versioning](https://semver.org/) for the pipeline YAML version field.
 
+## [tiering-profiles] — 2026-07-16
+
+### Added — consumer-configurable per-phase model + effort tiering profiles (#41)
+
+- **`profiles/tiering-profiles.yaml` (NEW)** — a named registry mapping each phase's `phase_class` (`rote | interpretive | implement | gate`) to `{ model, effort }`. Three profiles ship: `default` (identity/passthrough — every class `inherit`, so a project that opts into nothing gets byte-for-byte today's behavior), `budget-first` (cheapest viable ladder with a **haiku** floor for rote phases), and `quality-first` (spend on interpretation + implementation). Both opt-in ladders keep gates at `fable` / `xhigh`. Lives OUTSIDE `pipelines/` so the render-smoke glob never parametrizes it.
+- **`phase_class:` on every coding-pipeline phase** — all 29 phases across `coding-pipeline-standard` / `-maintenance` / `-skip-spec` now declare a `phase_class` (inert engine/command phases annotated `rote` as documentation only), plus a new OPTIONAL `tiering_profile` config-schema property (default `"default"`, never `required`). `comic-strip-pipeline.yaml` is explicitly OUT of scope (its gate-shaped phases are `opus`, not `fable`) — untouched.
+- **`skills/orchemist-run.md`** — the stale per-phase table is replaced with a complete `phase_class`-annotated table (adds the missing `test_adversary` / `acceptance_test_adversary` / `postmortem_*` / `verify_tests_integrity` rows), and a new "Tiering profiles" subsection documents the resolution algorithm, the **Fable gate-invariant HARD-STOP** (a `gate` class can never resolve below `fable`; a violating — or mis-annotated `fable`-but-not-`gate` — profile HALTs the run), and the honest Agent-vs-Workflow effort-gap.
+- **`workflows/orchemist-wave.js`** — the Workflow (`agent()`) path — the one path that CAN pass per-phase effort — gains a `tiering_profile` arg + an inline `EFFORT_BY_PROFILE` map + `effortFor(cls)`, spread into all 12 lane dispatches. `default` maps every class to `inherit` ⇒ `effortFor` returns `{}` ⇒ every default-profile dispatch stays byte-identical to the pre-#41 wave. Dispatch **models** stay the mode's hardcoded ladder (gates already pinned to `'fable'`).
+- **`install.sh` + `package.json`** — installer gains a `profiles/` copy step (src → `~/.claude/skills/orchemist/profiles/`, mirroring the pipelines block, with pre-flight + `--check` + summary lines); `package.json` adds `"profiles/"` to `files` for the new distribution surface.
+- **Validator + test (NEW)** — `tests/tiering_profiles.py` is the single source of truth (`resolve` / `assert_gate_floor` / `GateInvariantError` / `EXPECTED_GATES` / `llm_phases`), restated in prose by `orchemist-run.md`; `tests/test_tiering_profiles.py` enforces registry shape, annotation completeness, the `default`=passthrough backward-compat lock, the gate invariant + a byte-locked gate-annotation lock, budget floor, the JS↔YAML effort-map sync, and strict-fail (KeyError) on a partial profile.
+- **Docs** — `docs/tiering-profiles.md` (NEW) + `README.md` install-enumeration update and pointer.
+- **Version** — Pipeline versions bumped standard 2.1.0→2.2.0, maintenance 1.2.0→1.3.0, skip-spec 1.2.0→1.3.0; package 0.3.0→0.4.0. Render-smoke stays green (52 passed) + new tests/test_tiering_profiles.py green.
+
 ## [dotnet-acceptance-support] — 2026-07-15
 
 ### Added — .NET / C# sealed-acceptance support (a `csharp` language path across the 3 acceptance skills)

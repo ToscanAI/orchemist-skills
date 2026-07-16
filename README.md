@@ -16,7 +16,11 @@ cd orchemist-skills
 ./install.sh
 ```
 
-This copies the skills to `~/.claude/skills/`, subagents to `~/.claude/agents/`, and pipeline YAMLs to `~/.claude/skills/orchemist/pipelines/`. Running `./install.sh` twice is safe — it backs up any existing files to `<name>.bak.<UTC-timestamp>` and then reports an unchanged state on the second run.
+This copies the skills to `~/.claude/skills/`, subagents to `~/.claude/agents/`, pipeline YAMLs to `~/.claude/skills/orchemist/pipelines/`, and tiering profiles to `~/.claude/skills/orchemist/profiles/`. Running `./install.sh` twice is safe — it backs up any existing files to `<name>.bak.<UTC-timestamp>` and then reports an unchanged state on the second run.
+
+### Tiering profiles (optional)
+
+The coding pipelines resolve each phase's `{model, effort}` through a named **tiering profile** (`config.tiering_profile`, default `"default"`). The default is a zero-change no-op — every phase runs on its own declared model. Opt into `budget-first` or `quality-first`, or define your own, and the `gate` class can never resolve below Fable 5. See [`docs/tiering-profiles.md`](docs/tiering-profiles.md).
 
 ## First run
 
