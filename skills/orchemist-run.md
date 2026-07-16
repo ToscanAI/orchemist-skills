@@ -114,8 +114,8 @@ Parse this input into a `config` object with at least these keys:
 | `branch_name` | `fix/issue-<n>` if `issue_number` present, else `orchemist/<run-id>` | derived |
 | `issue_number` | parsed from `Closes #N` / `Fixes #N` in body, else `0` | `0` |
 | `repo_url` | from `git remote get-url origin` in repo_path | optional |
-| `test_command` | from input file `test_command:` field | `python3 -m pytest tests/ -x -q` |
-| `language` | from input file or detected from repo files | `python` |
+| `test_command` | from input file `test_command:` field | `python3 -m pytest tests/ -x -q` (default to `dotnet test` when `language` is `csharp`) |
+| `language` | from input file, else detected from repo files (detect `csharp` when the repo contains a `*.sln` or `*.csproj`) | `python` |
 | `style_guide` | from input file | "Follow existing code style. Add docstrings. Type hints where practical." |
 | `files_context` | from input file `files_context:` field | empty |
 
@@ -247,6 +247,7 @@ The `acceptance_run` phase has no LLM. Instead, pick the runner from `config.lan
 | `typescript`   | `<output_dir>/acceptance_tests.test.ts`    | `cd <config.repo_path> && npx jest <test_file> --verbose` (or `vitest run <test_file>`) |
 | `javascript`   | `<output_dir>/acceptance_tests.test.js`    | `cd <config.repo_path> && npx jest <test_file> --verbose`               |
 | `go`           | `<output_dir>/acceptance_tests_test.go`    | `cd <config.repo_path> && go test ./... -run AcceptanceTests -v`        |
+| `csharp`       | sealed `.cs` inside a dedicated test project (path in `state.acceptance_test_file` — see ".NET / C#" below) | `cd <config.repo_path> && dotnet test <state.csharp_test_project> --filter "FullyQualifiedName~<state.acceptance_test_fqn>" -v normal` (whole test project when no FQN recorded) |
 | (other / blank)| default to python                          | as above                                                                |
 
 Steps:
@@ -268,7 +269,15 @@ Steps:
      "failure_details": "<verbatim output for failing tests>"
    }
    ```
-5. Verdict = `success` iff `passed == total` AND `failed == 0` AND `errors == 0`. (Use integer equality, not `pass_rate == 1.0` float compare.)
+5. Verdict = `success` iff `passed == total` AND `failed == 0` AND `errors == 0`. (Use integer equality, not `pass_rate == 1.0` float compare.) For `csharp` this generic rule does NOT apply — the `.NET / C#` verdict rule (build succeeded AND `failed == 0` on every summary line AND `passed > 0` in aggregate; see the ".NET / C#" subsection below) REPLACES it. A csharp `Build FAILED` yields `passed == total == errors == 0`, which the generic `passed == total` rule would otherwise read as a FALSE SUCCESS; the override also covers a clean csharp pass with skipped tests, where `passed != total` (Total = Failed + Passed + Skipped) would otherwise false-RED under the generic rule.
+
+### .NET / C# (`language == csharp`)
+
+Detect `csharp` when the repo contains a `*.sln` or `*.csproj` (config table above; glob recursively from the repo root). Unlike interpreted languages, a C# test is not a runnable loose file — it must compile inside a test PROJECT that references the system-under-test. The `acceptance_test` phase writes the sealed xUnit test into a dedicated test project — convention `<repo>/src/<SUT-name>.Tests/` — reusing an existing `*.Tests` project if present, otherwise creating one via `dotnet new xunit` + `dotnet add reference` to the SUT project + `dotnet sln add`. Record that `.cs` file's ABSOLUTE path in `state.acceptance_test_file` (used by Seal integrity below; defaults to `<output_dir>/acceptance_tests.py` when unset for other languages), and record its fully-qualified test name (namespace + class) in `state.acceptance_test_fqn`.
+
+**Deterministic SUT / test-project selection** (never guess — a wrong `dotnet add reference` compiles the sealed test against the wrong or absent API and corrupts the very gate this change protects): (1) **SUT project** = the project named in the issue/spec context if one is given; else, if exactly one non-test `*.csproj` exists, that one; if multiple non-test `*.csproj` candidates exist and none is named, HALT with a BLOCKED reason (`ambiguous SUT project — <N> candidates, none specified`); if ZERO non-test `*.csproj` candidates exist and none is named, HALT with a BLOCKED reason (`no SUT project found — csharp detected but no non-test *.csproj in repo`). (2) **Test project** = the SUT-named `*.Tests` if given; else, if exactly one `*.Tests` project exists, reuse it; else create `<repo>/src/<SUT-name>.Tests/`; if multiple `*.Tests` projects exist and none is named, HALT (`ambiguous test project — <N> *.Tests candidates`). Record the chosen SUT and test-project ABSOLUTE paths in `state.json` (`state.csharp_sut_project`, `state.csharp_test_project`).
+
+`acceptance_run` runs `cd <config.repo_path> && dotnet test <state.csharp_test_project> --filter "FullyQualifiedName~<state.acceptance_test_fqn>" -v normal`. When no `state.acceptance_test_fqn` was recorded, it runs the WHOLE test project with NO `--filter` — the safe default. It parses EVERY `Passed!` / `Failed!` summary line in the output (a multi-targeted project — multiple `<TargetFrameworks>` — emits one summary line per TFM) and aggregates them; the match must TOLERATE variable whitespace and the trailing `, Duration: …` field rather than requiring an exact literal string. It also detects `Build FAILED`, and returns `success` iff the build succeeded AND `failed == 0` on every summary line AND `passed > 0` in aggregate. Pre-implement, a C# acceptance test referencing not-yet-existing SUT types will FAIL TO COMPILE (`Build FAILED`) — that is the expected RED signal for .NET, recorded as red, NOT an infra error. This csharp verdict REPLACES the generic step-5 rule (see step 5 above). python/js/go/ts rows are unchanged.
 
 ## Command phase
 
@@ -356,8 +365,8 @@ Revision rounds (any phase routed back on `request_changes`) are minimum-diff by
 
 The standard pipeline has no built-in tamper check on the sealed test file (only the skip-spec pipeline carries a `verify_tests_integrity` phase). The orchestrator enforces the seal as a process step:
 
-1. **At seal time** — immediately after `acceptance_test` succeeds and BEFORE `implement` runs — hash the test file and record it in `state.json` (e.g. `state.acceptance_test_sha256 = sha256(<output_dir>/acceptance_tests.py)`; capture via `sha256sum`).
-2. **At `acceptance_run`** — re-hash the test file and compare to the sealed hash. A mismatch means the implementer (or anything else) mutated the sealed tests: do NOT count the run; halt with an integrity-failure status and surface which file changed.
+1. **At seal time** — immediately after `acceptance_test` succeeds and BEFORE `implement` runs — hash the sealed test file and record it in `state.json` (`state.acceptance_test_sha256 = sha256(<sealed test file>)`; capture via `sha256sum`). The sealed test file is `state.acceptance_test_file` — an ABSOLUTE path that defaults to `<output_dir>/acceptance_tests.py` when unset (python loose-file artifact; other interpreted languages retain today's unset-field behavior, out of scope for this change). For `csharp` it is the sealed `.cs` file inside the test project (see the ".NET / C#" subsection and the acceptance-run table above).
+2. **At `acceptance_run`** — re-hash the sealed test file (`state.acceptance_test_file`, defaulting as above) and compare to the sealed hash. A mismatch means the implementer (or anything else) mutated the sealed tests: do NOT count the run; halt with an integrity-failure status and surface which file changed.
 3. **Post-implement, before review** — re-verify once more, so a green `acceptance_run` cannot be laundered by a later edit. The acceptance gate is only trustworthy if the bytes that ran are the bytes that were sealed.
 
 ### Commit before dispatching a git/Bash-capable subagent
