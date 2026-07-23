@@ -14,11 +14,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PROFILES_PATH = REPO_ROOT / "profiles" / "tiering-profiles.yaml"
 PIPELINES_DIR = REPO_ROOT / "pipelines"
 
-# comic-strip is OUT of #41 (spec fork 1).
+# comic-strip is OUT of #41 (spec fork 1) — its gate-shaped phases are `opus`, not
+# `fable`. content-pipeline IS in scope: it is coding-adapted content that ships to
+# production behind the same CI/PR gates as code, so it earns the same tiering-profile
+# discipline (its fact_check + red_team gates are `fable`, like the coding pipelines').
 IN_SCOPE_PIPELINES = (
     "coding-pipeline-standard.yaml",
     "coding-pipeline-maintenance.yaml",
     "coding-pipeline-skip-spec.yaml",
+    "content-pipeline.yaml",
 )
 PHASE_CLASSES = ("rote", "interpretive", "implement", "gate")
 MODEL_VALUES = ("haiku", "sonnet", "opus", "fable", "inherit")
@@ -32,6 +36,7 @@ EXPECTED_GATES = {
     "coding-pipeline-standard.yaml":    {"spec_adversary", "test_adversary", "review"},
     "coding-pipeline-maintenance.yaml": {"spec_adversary", "review"},
     "coding-pipeline-skip-spec.yaml":   {"acceptance_test_adversary", "review"},
+    "content-pipeline.yaml":            {"fact_check", "red_team"},
 }
 
 
