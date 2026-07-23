@@ -1,0 +1,309 @@
+id: content-pipeline
+name: "Content Pipeline — coding-adapted (content = in-app data)"
+description: "Coding-adapted port of the engine content-pipeline for repos where CONTENT IS IN-APP DATA (a glossary term in entries.ts, a curated video-allowlist entry, a gated route, a marketing page) rather than a standalone markdown article. Flow: existing_symbols_inventory -> research -> draft -> fact_check(GATE, fable) -> red_team(GATE, fable) -> apply_fixes -> test(suite). Two deliberate upgrades over the advisory engine version: (1) fact_check + red_team are BLOCKING gates (APPROVE/REQUEST_CHANGES, loop back to draft), because a wrong fact or off-brand claim SHIPS TO PRODUCTION in a coding repo; (2) draft produces a REAL code diff on the feature branch and commits (edits the data file + a gated route + an allowlist entry), so the gates review `git diff main...<branch>` exactly like the coding pipelines' review phase — not a prose draft. Reuses the standard phase IDs where behaviour matches (existing_symbols_inventory, test) so orchemist-run's dispatch + the existing orchemist-test wrapper apply unchanged; the content-specific phases (research, draft, fact_check, red_team, apply_fixes) each get an explicit dispatch-table row + a dedicated skills/orchemist-*.md wrapper. Source-grounded: research + fact_check are anchored to {output_dir}/source_material.md (pre-placed by the operator) AND live web verification, per the repo's source-grounded content doctrine."
+author: "Toscan"
+version: "0.1.0"
+category: "content"
+tags: [content, glossary, curation, fact_check, red_team, source_grounded, pipeline]
+use_cases:
+  - "Add / edit a glossary term (in-app data such as entries.ts) with source-grounded, fact-checked, on-brand copy"
+  - "Curate a video-allowlist entry (a TERM_VIDEOS-style map) with a verified, embeddable, on-topic link"
+  - "Author a small content page / marketing section whose claims must be traceable to sources and survive an adversarial brand/tone pass"
+
+# When NOT to use: a code behaviour change with a locally-sealable behavioral
+# contract -> coding-pipeline-standard; a bug/infra fix -> --maintenance. This
+# pipeline is for CONTENT (facts, copy, curated links) that ships as in-app data
+# and must be fact-checked + brand-audited before it reaches production.
+
+config_schema:
+  type: object
+  required: [issue_title, issue_body, repo_path, branch_name, issue_number, repo_url, source_material]
+  properties:
+    issue_title: { type: string }
+    issue_body: { type: string }
+    repo_path: { type: string }
+    branch_name: { type: string }
+    issue_number: { type: integer }
+    repo_url: { type: string }
+    source_material:
+      type: string
+      description: "Short summary (<500 chars) of the source material. The FULL sources (Investopedia / OIC / SEC / operator transcript, etc.) MUST be pre-placed at {output_dir}/source_material.md BEFORE launch — same pre-placed-file handoff as --skip-spec's spec.md/behavioral.md. research + fact_check are anchored to this file; a claim traceable to neither this file NOR live web verification is a fact_check REQUEST_CHANGES."
+    topic:
+      type: string
+      description: "What the content covers. Defaults conceptually to issue_title when unset; recon + research ground it against the actual data shape."
+    content_type:
+      type: string
+      default: "glossary-term"
+      description: "One of: glossary-term | video-entry | page | article. Selects which data surface draft edits (entries.ts row | a TERM_VIDEOS-style allowlist entry | a gated route/page | a markdown article)."
+    target_file:
+      type: string
+      default: ""
+      description: "Absolute-or-repo-relative path to the in-app data file draft edits (e.g. apps/web/app/(app)/learn/data/entries.ts). Empty => recon'd by Phase 0 from content_type."
+    allowlist_file:
+      type: string
+      default: ""
+      description: "The curated-allowlist file a video/link registers in (e.g. the TERM_VIDEOS-style map in .../data/tiers.ts). Empty => recon'd by Phase 0; ignored for content_type that has no allowlist."
+    gated:
+      type: boolean
+      default: true
+      description: "Whether the content ships behind a gated route/flag (draft wires the gate + the gate's default-off state) — true for anything not yet ready for all users."
+    test_command:
+      type: string
+      default: "pnpm typecheck && pnpm lint && pnpm test:content-invariant"
+      description: "Suite command for the test phase — the content-invariant gate (no duplicate/orphan slugs, allowlist keys resolve, every entry ships >=1 curated link, links well-formed) + typecheck + lint. A consumer with a seeded content render + axe pass appends `&& pnpm exec playwright test <seeded-content-spec>` (light+dark). NOT a sealed verify-script."
+    language: { type: string, default: "typescript" }
+    style_guide:
+      type: string
+      default: "Match the surrounding data shape EXACTLY (the LearnEntry/ExternalLink/allowlist types). Anti-hype, evidence-led, brand-consistent copy. Keep the change minimal + additive; do NOT rewrite unrelated entries."
+    tiering_profile:
+      type: string
+      default: "default"
+      description: "Named model+effort tiering profile from profiles/tiering-profiles.yaml (default | budget-first | quality-first, or a consumer-defined profile). 'default' reproduces this pipeline's declared per-phase model_tier with session-inherited effort (zero behavior change). The `gate` class (fact_check, red_team) can never resolve below `fable`. See docs/tiering-profiles.md."
+
+example_input:
+  issue_title: "Learn glossary: add a source-grounded 'ROIC' term + curated video"
+  issue_body: "Add a Tier-3 'roic' entry to entries.ts with anti-hype, source-grounded copy and >=1 curated Investopedia link, plus a TERM_VIDEOS allowlist entry for an embeddable, on-topic explainer. Closes #123"
+  repo_path: "/home/toscan/value-investing"
+  branch_name: "content/roic-glossary-term"
+  issue_number: 123
+  repo_url: "https://github.com/ToscanAI/value-investing"
+  source_material: "Investopedia ROIC definition + OIC primer; full text pre-placed at {output_dir}/source_material.md"
+
+phases:
+  # ── Phase 0: recon — the content data shape + curated allowlist + gated route ──
+  - id: existing_symbols_inventory
+    name: "Recon — content data shape / allowlist / gated route"
+    description: "Grep the content surface so draft CONSUMES the existing shape rather than re-inventing it: the entries.ts row type (LearnEntry/ExternalLink), the TERM_VIDEOS-style allowlist type + its key convention, the gated-route/flag pattern, and any seal/verify script guarding the content-invariant. Reuses the existing /orchemist:existing-symbols-inventory wrapper (same phase-id)."
+    model_tier: sonnet
+    phase_class: rote
+    thinking_level: medium
+    max_iterations: 2
+    transitions:
+      success: research
+      failed: existing_symbols_inventory
+      timeout: existing_symbols_inventory
+      exhausted: research
+    prompt_template: |
+      [PIPELINE CONTEXT] CONTENT pipeline — Phase 0 RECON. Read-only. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      Issue #{config[issue_number]}: {config[issue_title]}
+      {config[issue_body]}
+
+      Survey the content surface in {config[repo_path]} for content_type `{config[content_type]}` (target file `{config[target_file]}`, allowlist `{config[allowlist_file]}` — recon these paths yourself if either is empty). Produce {output_dir}/existing_symbols.md covering: (1) the exact data-row shape draft must MATCH — the entry/record type and every field (e.g. LearnEntry: slug/term/tier/category/oneLiner/body/externalLinks/relatedSlugs/productLinks), with file:line; the curated-link helper (e.g. `X(label, source, url)`) to REUSE. (2) the ALLOWLIST — the curated video/link map (e.g. `TERM_VIDEOS: Partial<Record<string, LearnVideoRef>>`), its key convention, and whether keys are a loose `Record<string,_>` (a wrong/orphan key WON'T fail tsc — the content-invariant test must catch it) or a `keyof` union (tsc catches it). (3) the GATED-ROUTE / flag pattern for `gated={config[gated]}` content (how a not-yet-public entry is hidden, and its default-off state). (4) SEAL-SWEEP — for each file draft will touch, the content-invariant / verify / nightly script guarding it (duplicate-slug guard, allowlist-resolves guard, >=1-curated-link guard, link-well-formedness): is it gated, by which mechanism, FIX-in-place vs ESCALATE. Degrade gracefully — `(no seal/verify scripts in this repo)` if none. (5) EXISTING entries near the new content (same tier/category) whose voice + link-discipline draft should mirror, and any duplicate-slug collision the new slug would cause. Keep it tight + evidence-based (file:line).
+
+  # ── RESEARCH — source_material.md + web-verify into a sourced brief ──────────
+  - id: research
+    name: "Research & Synthesis (source-grounded)"
+    description: "Synthesize {output_dir}/source_material.md + live web search into a structured research brief. Every claim gets an EXACT source + URL; unverifiable claims are marked [UNVERIFIED]; ends with a full sources list. This brief is the ground truth the draft's copy + curated links must trace to."
+    model_tier: sonnet
+    phase_class: interpretive
+    thinking_level: high
+    max_iterations: 3
+    transitions:
+      success: draft
+      failed: research
+      timeout: research
+      exhausted: draft
+    prompt_template: |
+      [PIPELINE CONTEXT] CONTENT pipeline — RESEARCH phase. Read {output_dir}/existing_symbols.md first. Output feeds DRAFT — not a human. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      Issue #{config[issue_number]}: {config[issue_title]}
+      {config[issue_body]}
+
+      ## Source Material
+      Read the full operator-provided sources from {output_dir}/source_material.md. If that file is absent, proceed on the topic + web research and NOTE the absence prominently (draft will have thinner ground truth).
+
+      ## Task
+      1. Extract every fact, definition, statistic, and quote the content will rely on from source_material.md.
+      2. **Use web search** to independently verify each one and to find authoritative corroboration (prefer the operator's canonical sources — e.g. Investopedia / OIC / SEC — over opinion blogs). Do NOT rely solely on the provided material.
+      3. For each fact, record the EXACT source (publication, date, URL). Every claim MUST carry a verifiable URL.
+      4. For any claim you cannot independently verify, mark it `[UNVERIFIED]` with the reason (draft must NOT ship an [UNVERIFIED] claim as fact — it either gets verified or dropped).
+      5. For a `video-entry`/link, propose 1-3 CANDIDATE curated links: each must be authoritative, on-topic, and (for an embeddable video) verified reachable + embeddable — record the exact URL and why it fits the term.
+      6. Note brand/voice constraints from the existing entries (anti-hype, evidence-led) the copy must honor.
+      7. End with a complete SOURCES LIST (full attribution + URL for every source referenced).
+
+      **You have web-search tools. USE THEM** — a source-grounded brief without web-verified URLs is incomplete.
+
+      Write the brief to {output_dir}/research.md. End the file with a line: success
+
+  # ── DRAFT — edit the real data file(s) + gate + allowlist, then COMMIT ──────
+  - id: draft
+    name: "Draft — edit in-app content data + commit"
+    description: "Turn the research brief into a REAL code diff on the feature branch: add/edit the data row (entries.ts-style), register the curated allowlist entry, wire the gate for gated content, run typecheck/lint + the content-invariant, and COMMIT. Reuses the orchemist-implementer subagent (Read/Write/Edit/Glob/Grep/Bash). The gates downstream review this diff, not a prose file."
+    model_tier: opus
+    phase_class: implement
+    thinking_level: high
+    max_iterations: 3
+    transitions:
+      success: fact_check
+      failed: draft
+      timeout: draft
+      exhausted: draft
+    prompt_template: |
+      [PIPELINE CONTEXT] CONTENT pipeline — DRAFT phase. Read {output_dir}/existing_symbols.md + {output_dir}/research.md first. Output feeds the FACT_CHECK gate — not a human. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      Issue #{config[issue_number]}: {config[issue_title]}
+      {config[issue_body]}
+
+      On branch {config[branch_name]} in {config[repo_path]}, implement the content for content_type `{config[content_type]}` as a MINIMAL, ADDITIVE code diff — matching the exact data shape recon found. Style: {config[style_guide]}.
+
+      ## What to edit
+      1. **The data row** in `{config[target_file]}` (recon it if empty) — add/edit ONE record in the existing shape. Example of the shape to MATCH (illustrative — use the real fields recon reported; escaped braces are literal):
+         ```ts
+         const X = (label: string, source: string, url: string): ExternalLink => ({{ label, source, url }});
+         {{
+           slug: 'roic',
+           term: 'Return on invested capital (ROIC)',
+           tier: 3,
+           category: 'the-numbers',
+           oneLiner: 'How many cents of operating profit a business earns per dollar of capital it employs.',
+           body: ['Source-grounded, anti-hype prose. Every factual claim traces to {output_dir}/research.md.'],
+           externalLinks: [ X('Return on Invested Capital', 'Investopedia', 'https://www.investopedia.com/terms/r/returnoninvestmentcapital.asp') ],
+           relatedSlugs: ['moat'],
+           productLinks: [],
+         }},
+         ```
+      2. **The curated allowlist** in `{config[allowlist_file]}` (for a `video-entry`/link) — register ONE verified, embeddable, on-topic entry keyed by the new slug (illustrative shape):
+         ```ts
+         'roic': {{
+           title: 'Return on invested capital, explained',
+           source: 'Investopedia',
+           duration: '5:31',
+           url: 'https://www.youtube-nocookie.com/embed/ZrvJTn981lo',
+         }},
+         ```
+      3. **The gate** — for `gated={config[gated]}` content, wire it behind the recon'd gated-route/flag pattern with its default-OFF state (not yet public), unless the issue says ship-to-all.
+
+      ## Rules (source-grounded content doctrine)
+      - Every factual claim in the copy MUST trace to {output_dir}/research.md; do NOT ship an `[UNVERIFIED]` claim as fact.
+      - Every curated link must be authoritative + on-topic; a video URL must be reachable + embeddable (recon/research verified it).
+      - Anti-hype, evidence-led, brand-consistent voice — mirror the neighboring entries; no marketing hype tokens.
+      - SELF-CHECK before commit: the new slug is unique (no duplicate), every allowlist key resolves to a real entry (no orphan), the entry ships >=1 curated link, and all URLs are well-formed markdown/verified.
+      - Do NOT touch any sealed/verify file flagged in recon (if the change requires it, STOP and report BLOCKED).
+
+      Run {config[test_command]}; confirm green. Commit (do NOT push or open a PR — the orchestrator does that). Write {output_dir}/draft.md: what changed (file:line), which claims map to which research.md source, the curated link(s) + verification, self-check result, suite result, commit SHA. End with `VERDICT: success` or `VERDICT: failed`.
+
+  # ── FACT_CHECK (gate, fable) — source-grounded, web-verified, blocks ────────
+  - id: fact_check
+    name: "Fact Check (gate, fable — source-grounded)"
+    description: "BLOCKING gate. Reviews the draft's diff: every factual claim in the new copy is traceable to {output_dir}/source_material.md OR independently web-verified, every curated link is live + on-topic, no dead URL. Dispatches general-purpose(fable) — NOT the adversary subagent — because it needs WebSearch/WebFetch + Bash (`git diff`) which the Read/Grep/Glob-only adversary lacks. STRICTER than the engine's advisory report: request_changes on ANY untraceable claim or dead link."
+    model_tier: fable
+    phase_class: gate
+    thinking_level: high
+    max_iterations: 3
+    transitions:
+      approve: red_team
+      request_changes: draft
+      failed: fact_check
+      success: red_team
+      exhausted: draft
+    prompt_template: |
+      [PIPELINE CONTEXT] CONTENT pipeline — FACT_CHECK gate (fable, independent). Your verdict blocks: APPROVE advances to red_team; REQUEST_CHANGES loops back to draft. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      Fact-check the content diff for issue #{config[issue_number]} ({config[issue_title]}) in {config[repo_path]}.
+
+      ## Evidence to gather FIRST
+      1. `git checkout {config[branch_name]}` then `git diff main...{config[branch_name]}` — the content draft committed.
+      2. Capture that diff to {output_dir}/draft_diff.md (`git diff main...{config[branch_name]} > {output_dir}/draft_diff.md`) so the Bash-less red_team adversary can Read it next phase. This is REQUIRED — red_team cannot run git.
+      3. Read {output_dir}/source_material.md (operator ground truth) + {output_dir}/research.md (the sourced brief).
+
+      ## Check (source-grounded content doctrine — STRICTER than an advisory report)
+      1. Every factual claim / definition / statistic in the new copy is EITHER traceable to {output_dir}/source_material.md OR independently confirmed by live web search. A claim that is neither -> REQUEST_CHANGES (do not let an unsourced claim ship).
+      2. Every curated link (externalLink + any allowlist video URL) is LIVE (use WebFetch/WebSearch), on-topic, and authoritative. Any dead / off-topic / non-embeddable link -> REQUEST_CHANGES.
+      3. No `[UNVERIFIED]` claim from research.md shipped as fact.
+      4. Numbers/definitions internally consistent; attribution accurate.
+      5. **Use web search** — a fact-check that only compares two documents without checking external reality is not a real fact-check.
+
+      Do NOT flag voice/tone/brand here (that is red_team's job) — you rule ONLY on factual accuracy + link liveness.
+
+      Write {output_dir}/fact_check.md: numbered findings (each: location, claim, what's wrong, the source that should back it or that it's untraceable, the fix). The FIRST line MUST be `APPROVE` or `REQUEST_CHANGES` and nothing else; end the file with `VERDICT: APPROVE` or `VERDICT: REQUEST_CHANGES`.
+
+  # ── RED_TEAM (gate, fable) — brand / tone / IP / claim-support, blocks ──────
+  - id: red_team
+    name: "Red Team (gate, fable — brand / tone / IP)"
+    description: "BLOCKING gate. Adversarial pass over the SAME diff for tone/brand/backlash risk, IP/trademark leakage, hallucinated claims, and claim-support completeness. Reuses the orchemist-adversary subagent (Read/Grep/Glob is sufficient — it audits text on disk, no live web needed). Reads {output_dir}/draft_diff.md that fact_check captured (the adversary has no Bash). Upgraded from the engine's advisory pass to a blocking gate."
+    model_tier: fable
+    phase_class: gate
+    thinking_level: high
+    max_iterations: 3
+    transitions:
+      approve: apply_fixes
+      request_changes: draft
+      failed: red_team
+      success: apply_fixes
+      exhausted: draft
+    prompt_template: |
+      [PIPELINE CONTEXT] CONTENT pipeline — RED_TEAM gate (fable, independent adversary). Your verdict blocks: APPROVE advances to apply_fixes; REQUEST_CHANGES loops back to draft. You have Read/Grep/Glob only — no Bash. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      Adversarially red-team the content diff for issue #{config[issue_number]} ({config[issue_title]}).
+
+      Read the committed diff at {output_dir}/draft_diff.md (fact_check captured it for you — you cannot run git), plus {output_dir}/research.md and {output_dir}/existing_symbols.md.
+
+      ## Hunt (each present item is a finding)
+      1. **Unsupported claim** — any factual statement in the copy with no source behind it in research.md (fact_check owns liveness; you own whether the copy OVER-claims beyond what the sources support).
+      2. **Tone / backlash risk** — hype, dismissiveness, punching-down, or claims that read as advice/guarantee where the brand voice is measured + evidence-led.
+      3. **IP / trademark leakage** — a competitor's trademarked method name, a proprietary phrase, or a copied passage that must be paraphrased/attributed (per the repo's brand doctrine — e.g. banned method-name tokens).
+      4. **Hallucinated specifics** — an invented statistic, quote, date, or attribution not in the sources.
+      5. **Brand consistency** — voice drifts from the neighboring entries; a curated `source` label off the approved allowlist vocabulary; a missing honest-precondition (e.g. an N/A case) the neighbors preserve.
+      6. **Curation discipline** — entry ships <1 curated link; a duplicate/orphan slug the copy implies.
+
+      For each finding: the exact location in the diff, why it will bite, and the precise amendment. Protect legitimate measured voice — do not flag evidence-led plainness as a defect.
+
+      Write {output_dir}/red_team.md. The FIRST line MUST be `APPROVE` or `REQUEST_CHANGES` and nothing else; end the file with `VERDICT: APPROVE` or `VERDICT: REQUEST_CHANGES`.
+
+  # ── APPLY_FIXES — fold BOTH gate reports into a minimal diff, re-commit ─────
+  - id: apply_fixes
+    name: "Apply fixes (both gate reports)"
+    description: "Fold BOTH gate findings files ({output_dir}/fact_check.md + {output_dir}/red_team.md) into a single minimal diff on the branch, re-run the content-invariant + typecheck/lint, and re-commit. Same dispatch shape as maintenance's fix phase (general-purpose/opus) but reads TWO reports instead of one, so it is its own wrapper, not /orchemist:fix."
+    model_tier: opus
+    phase_class: implement
+    thinking_level: high
+    max_iterations: 3
+    transitions:
+      success: test
+      failed: apply_fixes
+      timeout: apply_fixes
+      exhausted: test
+    prompt_template: |
+      [PIPELINE CONTEXT] CONTENT pipeline — APPLY_FIXES phase. Read {output_dir}/fact_check.md + {output_dir}/red_team.md and fold in BOTH. Output feeds the test suite. Do not ask questions or send messages. [/PIPELINE CONTEXT]
+
+      Issue #{config[issue_number]}: {config[issue_title]}
+
+      On branch {config[branch_name]} in {config[repo_path]}, apply EVERY finding from BOTH gate reports in a single minimal pass:
+      - {output_dir}/fact_check.md — fix unsourced/untraceable claims (source them or drop them), replace dead/off-topic curated links with verified ones.
+      - {output_dir}/red_team.md — soften over-claims, remove IP/trademark leakage, align tone + brand voice, restore any missing honest-precondition, fix curation discipline.
+
+      Rules: minimal + additive; keep every claim traceable to {output_dir}/research.md / source_material.md; do NOT introduce a NEW unsourced claim while fixing; preserve the data shape; disturb no sealed/verify file. Re-run the SELF-CHECK (unique slug, allowlist keys resolve, >=1 curated link, URLs well-formed) and {config[test_command]}; confirm green. Commit (do not push). Write {output_dir}/apply_fixes.md: each finding addressed (one bullet per finding from both files) + any intentional deferral + suite result + commit SHA. End with `VERDICT: success` or `VERDICT: failed`.
+
+  # ── TEST (suite — command phase, no LLM; reuses /orchemist:test) ────────────
+  - id: test
+    name: "Suite (content-invariant / typecheck / lint)"
+    description: "Run the project content-invariant suite + typecheck + lint. NOT a sealed verify-script. Reuses the existing /orchemist:test wrapper verbatim via phase-id naming. On failure loops back to apply_fixes; on success the pipeline terminates and the orchestrator opens the PR (Closes #N) + auto-merges on green CI, then prod-validates."
+    task_type: command
+    phase_class: rote  # inert: no LLM dispatch — annotation only
+    command: "{config[test_command]}"
+    working_dir: "{config[repo_path]}"
+    max_iterations: 2
+    transitions:
+      # on success: no target -> pipeline terminates; the orchestrator then opens the
+      # PR (Closes #N) + auto-merges on green CI, then runs PROD-VALIDATION (view the
+      # content live: term renders, curated link/video plays, gate state correct).
+      failed: apply_fixes
+      timeout: test
+    allowed_commands: ["pnpm", "npm", "npx", "node", "turbo", "tsc", "vitest", "jest", "bash", "sh", "playwright"]
+
+# After `test` succeeds the orchestrator: opens the PR (Closes #N, reviewer
+# Conny-Lazo), squash auto-merges on green CI, then performs PROD-VALIDATION (the
+# content acceptance test): deploy + view the content live (term renders, curated
+# link/video is reachable + on-brand, gate default-state correct).
+# UMBRELLA CAVEAT (#31): the (Closes #N) above assumes one issue -> one PR. If this
+# issue is an umbrella split across sub-lane PRs (successive content runs against the
+# SAME issue_number), do NOT let a non-final sub-PR auto-close it: use a
+# parenthesis-safe `content(#N):`/`fix(#N):` subject and keep each non-final
+# squash/PR body EMPTY of any (clos|fix|resolv)...#N; only the final lane carries
+# `Closes #N`. If the umbrella stays open after all sub-lanes merge, close it.
+auto_merge:
+  enabled: true
+  min_score: 0.90
+  require_approve: true
+  strategy: squash
