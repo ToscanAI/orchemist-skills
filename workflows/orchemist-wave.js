@@ -964,7 +964,7 @@ if (mode === 'maintenance') {
       if (!pf) return { lane, seal: null }
       for (let round = 0; round < 2; round++) {
         const v = await agent(standardTestAdversaryPrompt(lane, test, pf), { label: `test-adv:${lane.id}`, phase: 'Test Adversary', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
-        if (!v || v.verdict === 'APPROVE') { pf._approvedVerdict = v; break }
+        if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: test-adversary still REQUEST_CHANGES after 1 revise — SEAL proceeds with the adversary notes folded in.`); break }
         test = await agent(standardAcceptanceTestRevisePrompt(lane, test, v), { label: `acc-test-rev:${lane.id}`, phase: 'Acceptance Test', agentType: 'orchemist-tester', schema: SEALED_TEST_SCHEMA, ...effortFor('interpretive') })
         if (!test) return { lane, seal: null }
@@ -987,12 +987,19 @@ if (mode === 'maintenance') {
     },
     // Stage 5 — acceptance_run
     async ({ lane, impl, seal }) => {
-      if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'implement did not reach pushed state' : 'spec, acceptance_test, or SEAL returned null')
+      if (!impl || impl.status !== 'pushed') return { lane, impl, seal, run: null }
       const run = await agent(standardAcceptanceRunPrompt(lane, impl, seal), { label: `acc-run:${lane.id}`, phase: 'Acceptance Run', agentType: 'general-purpose', isolation: 'worktree', schema: ACCEPTANCE_RUN_SCHEMA, ...effortFor('implement') })
-      return { lane, impl, run }
+      return { lane, impl, seal, run }
     },
-    // Stage 6 — review
-    async ({ lane, impl, run }) => {
+    // Stage 6 — review (blocked records are built HERE, the final stage, so lane/issue/branch
+    // survive every failure path — mirrors maintenance:863, codemod:890, content:910, refactor:1007)
+    async ({ lane, impl, seal, run }) => {
+      if (!impl || impl.status !== 'pushed') {
+        const reason = seal && seal.status !== 'sealed'
+          ? `SEAL blocked: ${seal.notes || 'status=' + seal.status}`
+          : (impl ? impl.notes || 'implement did not reach pushed state' : 'spec, acceptance_test, or SEAL returned null')
+        return blockedRecord(lane, impl, reason)
+      }
       if (!run || !run.seal_intact || run.failed > 0) return blockedRecord(lane, impl, run ? `acceptance_run: seal_intact=${run.seal_intact} failed=${run.failed}` : 'acceptance_run returned null')
       const v = await agent(standardReviewPrompt(lane, impl, run), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
       return reviewedRecord(lane, impl, v)
