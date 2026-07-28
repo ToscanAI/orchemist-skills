@@ -309,7 +309,7 @@ function refactorReviewPrompt(lane, impl) {
   return `You are an INDEPENDENT senior reviewer for wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Verdict: APPROVE or REQUEST_CHANGES. Be adversarial — VERIFY, do not trust the implementer. A dropped re-export can pass both the contract test AND the full suite; only an explicit surface-diff catches it.
 
 ## Read-only mandate
-You are in your own worktree. Inspect the branch \`${lane.branch}\` @ \`${impl.pushed_sha || '(see origin)'}\`, forked from \`${base}\`. Use \`git fetch origin\`, \`git diff ${base}...origin/${lane.branch}\`, \`git show\`, read files, and READ-ONLY checks. Do NOT write/edit/commit/stash/restore/push. If a fix is needed, describe it — do not apply it.
+You have NO worktree of your own — you share the orchestrator's checkout, so a git write here corrupts every concurrent lane. Inspect the PUSHED branch \`${lane.branch}\` @ \`${impl.pushed_sha || '(see origin)'}\`, forked from \`${base}\`, without touching the working tree. Use \`git fetch origin\`, \`git diff ${base}...origin/${lane.branch}\`, \`git show\`, read files, and READ-ONLY checks. Do NOT write/edit/commit/stash/restore/checkout/push. If a fix is needed, describe it — do not apply it.
 
 ## Implementer claimed (verify, don't trust)
 suite = ${impl.suite || '(none)'} · files = ${(impl.files || []).join(', ') || '(unspecified)'} · notes = ${impl.notes || '(none)'}
@@ -848,7 +848,7 @@ if (mode === 'maintenance') {
       for (let round = 0; round < 2; round++) {
         const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
-        if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds with the adversary notes folded in.`); break }
+        if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds on the spec plan alone — the unresolved findings are NOT forwarded.`); break }
         const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
         if (revised) spec = revised
       }
@@ -875,7 +875,7 @@ if (mode === 'maintenance') {
       for (let round = 0; round < 2; round++) {
         const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
-        if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds with the adversary notes folded in.`); break }
+        if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds on the spec plan alone — the unresolved findings are NOT forwarded.`); break }
         const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
         if (revised) spec = revised
       }
@@ -947,7 +947,7 @@ if (mode === 'maintenance') {
       for (let round = 0; round < 2; round++) {
         const v = await agent(standardSpecAdversaryPrompt(lane, spec, behavioral), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
-        if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — acceptance_test proceeds with the adversary notes folded in.`); break }
+        if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — acceptance_test proceeds on the behavioral contracts alone — the unresolved findings are NOT forwarded.`); break }
         const revisedSpec = await agent(standardSpecRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
         if (revisedSpec) spec = revisedSpec
         const revisedBehavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral-rev:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...effortFor('interpretive') })
@@ -965,7 +965,7 @@ if (mode === 'maintenance') {
       for (let round = 0; round < 2; round++) {
         const v = await agent(standardTestAdversaryPrompt(lane, test, pf), { label: `test-adv:${lane.id}`, phase: 'Test Adversary', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
-        if (round === 1) { log(`lane ${lane.id}: test-adversary still REQUEST_CHANGES after 1 revise — SEAL proceeds with the adversary notes folded in.`); break }
+        if (round === 1) { log(`lane ${lane.id}: test-adversary still REQUEST_CHANGES after 1 revise — SEAL proceeds on the sealed test as it stands — the unresolved findings are NOT forwarded.`); break }
         test = await agent(standardAcceptanceTestRevisePrompt(lane, test, v), { label: `acc-test-rev:${lane.id}`, phase: 'Acceptance Test', agentType: 'orchemist-tester', schema: SEALED_TEST_SCHEMA, ...effortFor('interpretive') })
         if (!test) return { lane, seal: null }
         pf = await agent(standardPreflightPrompt(lane, test), { label: `preflight2:${lane.id}`, phase: 'Acceptance Test', agentType: 'general-purpose', isolation: 'worktree', schema: PREFLIGHT_SCHEMA, ...effortFor('implement') })
