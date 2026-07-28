@@ -4,7 +4,11 @@ Deterministic multi-agent orchestrators (for the Claude Code `Workflow` tool), i
 
 ## `orchemist-wave.js` — parallel wave orchestrator
 
-Fans **N independent, file-disjoint lanes** through `implement (opus, sealed worktree) → independent opus review`, in **per-lane lockstep** (each lane reviews as soon as its own implement finishes — no barrier). It hands back reviewed, pushed branches plus a go/no-go verdict per lane.
+> **Full reference: [`../docs/orchemist-wave.md`](../docs/orchemist-wave.md)** — all five modes,
+> the complete lane object, every argument, the output schema, and the operator merge recipe. This
+> page is the short version.
+
+Fans **N independent, file-disjoint lanes** through a per-lane phase sequence, in **per-lane lockstep** (each lane reviews as soon as its own implement finishes — no barrier). Five modes select the sequence: `refactor` (default — `implement → review`), `maintenance` and `codemod` (`spec → spec-adversary → implement → review`), `content` (`research → draft → fact-check gate → red-team gate`), and `standard` (the full sealed-acceptance flow). Implement and draft dispatches run on **opus**; every adversary and review gate runs on **Fable 5**. It hands back reviewed, pushed branches plus a go/no-go verdict per lane.
 
 It deliberately **does not merge**. The merge-coordination — toggling branch protection, squash-merging to the shared default branch, and the post-merge composition full-suite — is outward-facing and easy to get subtly wrong, so it stays a deliberate operator step (described in the workflow's `next_step` output).
 
@@ -50,6 +54,7 @@ Workflow({ name: "orchemist-wave", args: { …see below… } })
 ```json
 {
   "ready": true,
+  "mode": "refactor",
   "approved_branches": [{ "lane": "950e", "issue": 1005, "branch": "...", "sha": "..." }],
   "lanes": [{ "lane": "...", "verdict": "APPROVE|REQUEST_CHANGES", "blockers": [], "suite": "..." }],
   "next_step": "…the operator merge-wave recipe, or the blockers to fix…"
@@ -58,6 +63,6 @@ Workflow({ name: "orchemist-wave", args: { …see below… } })
 
 ### Design notes
 - **`pipeline()` not `parallel()`** — per-lane lockstep, no barrier; lane B never waits on lane A's implementer.
-- **`isolation: 'worktree'`** per agent — concurrent lanes never collide on the git index; the implementer's pushed branch survives worktree cleanup.
+- **`isolation: 'worktree'`** on every dispatch that writes to the tree (implement/draft, plus `standard`'s pre-flight, SEAL, and acceptance-run) — concurrent lanes never collide on the git index, and the pushed branch survives worktree cleanup. Read-only planning and gate dispatches run without a worktree and inspect the pushed branch via `git fetch` + `git diff`.
 - **Verify, don't trust** — the reviewer independently reconstructs the parent surface and diffs it. (A dropped re-export can pass *both* the contract test and the full suite; only an explicit surface-diff catches it.)
 - **Composition gate is mandatory** — each PR's CI validated its *own* base, not the merged union, so the operator runs one full-suite on the merged tree after all merges.
