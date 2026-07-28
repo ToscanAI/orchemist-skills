@@ -244,7 +244,7 @@ When you render a phase's `prompt_template`, replace these tokens by reading pri
 - `{{output_dir}}` → absolute path to `<output_dir>`
 - `{{phase_summary}}` → concatenation of "## Previous phase: <id>\n<file contents>" for each completed phase (excluding the current one). Keep total under ~6000 chars by trimming each file to its first 1500 chars if needed.
 - `{{iteration_history}}` → if this phase has prior rounds (`state.phase_iterations[phase.id] > 1`), embed previous round outputs from `<output_dir>/<phase.id>_round<N>.md`. Otherwise empty string.
-- `{{phase_diff}}` (used by `spec_adversary`) → produced by `diff -u <output_dir>/spec_round<N-1>.md <output_dir>/spec.md` (or `git diff --no-index <old> <new>` if you prefer). Empty string when `spec_round<N-1>.md` does not exist (i.e. round 1).
+- `{{phase_diff}}` (used by `spec_adversary`) → produced by `diff -u <output_dir>/spec_round<N-1>.md <output_dir>/spec.md`, or equivalently `git diff --no-index <old> <new>`. On any host without POSIX `diff` (e.g. PowerShell-only Windows) use the `git` form: `git` is present in every Orchemist run by construction, and it emits the same unified-diff format the downstream adversary expects. Empty string when `spec_round<N-1>.md` does not exist (i.e. round 1).
 
 For each round, BEFORE invoking the phase skill, copy the existing `<output_dir>/<phase_id>.md` (if any) to `<output_dir>/<phase_id>_round<N>.md` so prior rounds are preserved.
 
@@ -370,13 +370,13 @@ On EVERY adversary dispatch (spec and test alike), the orchestrator names 1-2 **
 Revision rounds (any phase routed back on `request_changes`) are minimum-diff by mandate:
 
 - The revision prompt carries the **verbatim-prescribed fixes** (the adversary's exact findings / OLD→NEW edits) plus an explicit **"everything else stays byte-stable"** instruction.
-- The re-auditor (the next adversary round) is handed the **inter-round diff** as its change surface — `diff -u <output_dir>/<phase>_round<N-1>.md <output_dir>/<phase>.md` (this is already produced as `{{phase_diff}}` for `spec_adversary`; produce the equivalent for any phase being re-audited). It reviews what CHANGED, not the whole file again. In the engine campaign a diff-scoped re-audit took ~1 minute versus a full re-read.
+- The re-auditor (the next adversary round) is handed the **inter-round diff** as its change surface — `diff -u <output_dir>/<phase>_round<N-1>.md <output_dir>/<phase>.md` (or `git diff --no-index <old> <new>` where POSIX `diff` is unavailable; this is already produced as `{{phase_diff}}` for `spec_adversary`; produce the equivalent for any phase being re-audited). It reviews what CHANGED, not the whole file again. In the engine campaign a diff-scoped re-audit took ~1 minute versus a full re-read.
 
 ### Seal integrity
 
 The standard pipeline has no built-in tamper check on the sealed test file (only the skip-spec pipeline carries a `verify_tests_integrity` phase). The orchestrator enforces the seal as a process step:
 
-1. **At seal time** — immediately after `acceptance_test` succeeds and BEFORE `implement` runs — hash the sealed test file and record it in `state.json` (`state.acceptance_test_sha256 = sha256(<sealed test file>)`; capture via `sha256sum`). The sealed test file is `state.acceptance_test_file` — an ABSOLUTE path that defaults to `<output_dir>/acceptance_tests.py` when unset (python loose-file artifact; other interpreted languages retain today's unset-field behavior, out of scope for this change). For `csharp` it is the sealed `.cs` file inside the test project (see the ".NET / C#" subsection and the acceptance-run table above).
+1. **At seal time** — immediately after `acceptance_test` succeeds and BEFORE `implement` runs — hash the sealed test file and record it in `state.json` (`state.acceptance_test_sha256 = sha256(<sealed test file>)`; capture via `sha256sum`, or `shasum -a 256`, or `(Get-FileHash -Algorithm SHA256 <path>).Hash` on a PowerShell-only host — record the bare hex digest and compare case-insensitively, since `Get-FileHash` returns UPPERCASE hex and `sha256sum` lowercase). The sealed test file is `state.acceptance_test_file` — an ABSOLUTE path that defaults to `<output_dir>/acceptance_tests.py` when unset (python loose-file artifact; other interpreted languages retain today's unset-field behavior, out of scope for this change). For `csharp` it is the sealed `.cs` file inside the test project (see the ".NET / C#" subsection and the acceptance-run table above).
 2. **At `acceptance_run`** — re-hash the sealed test file (`state.acceptance_test_file`, defaulting as above) and compare to the sealed hash. A mismatch means the implementer (or anything else) mutated the sealed tests: do NOT count the run; halt with an integrity-failure status and surface which file changed.
 3. **Post-implement, before review** — re-verify once more, so a green `acceptance_run` cannot be laundered by a later edit. The acceptance gate is only trustworthy if the bytes that ran are the bytes that were sealed.
 
@@ -388,7 +388,7 @@ Field report (a production EPIC-20 run): a seal-break edit was applied to the wo
 
 Discipline:
 1. **Commit any uncommitted working-tree change BEFORE dispatching a subagent with git/Bash.** A committed change survives the subagent's git ops. Most acute in the seal-break flow (edit → narrow review) and the implement/fix → review loop. (If you must keep it uncommitted, `git stash` it yourself and restore after — do not rely on the subagent to leave the tree untouched.)
-2. **After such a subagent returns, COMMAND-VERIFY** the working tree / HEAD still carries your intended bytes (`git status`; `git show HEAD:<file> | sha256sum` vs the expected/re-sealed sha) before trusting any "green" claim it made.
+2. **After such a subagent returns, COMMAND-VERIFY** the working tree / HEAD still carries your intended bytes (`git status`; `git show HEAD:<file> | sha256sum` — or `shasum -a 256`, or pipe to `Get-FileHash -Algorithm SHA256` on a PowerShell-only host — vs the expected/re-sealed sha) before trusting any "green" claim it made.
 3. **Prefer a read-only reviewer subagent type** (Read/Grep/Glob only — e.g. the `orchemist-adversary`) for pure review; it cannot mutate the tree. Reach for a full-tools `general-purpose` reviewer only when it must run commands — and commit first.
 
 ## Output contract
