@@ -2,7 +2,7 @@
 
 Ground truth (issue #50): on a Windows clone with Git-for-Windows' default
 ``core.autocrlf=true`` every text artifact lands CRLF in the working tree,
-``install.sh`` copies those bytes verbatim into ``~/.claude/``, and Claude
+``install.mjs`` copies those bytes verbatim into ``~/.claude/``, and Claude
 Code's ``Workflow`` permission layer then REFUSES to launch
 ``workflows/orchemist-wave.js`` because the CR (0x0D) bytes are "control
 characters that would be hidden in the approval dialog".
@@ -11,7 +11,7 @@ The fix is belt-and-braces and these tests lock both halves in:
 
 * ``.gitattributes`` (``* text=auto eol=lf``) fixes *fresh* clones — asserted
   with ``git check-attr`` and end-to-end with a simulated Windows clone.
-* ``normalize_lf`` inside ``install.sh``'s ``install_file`` covers the
+* ``normalizeLf`` inside ``install.mjs``'s ``installFile`` covers the
   population ``.gitattributes`` cannot reach: an existing consumer clone keeps
   its CRLF working tree until ``git add --renormalize`` is run.
 
@@ -21,7 +21,8 @@ makes every run see drift. That is not merely a noisy ``--check`` — it breaks
 the installer's headline idempotency promise ("Running twice is safe: the
 second run produces identical state") and litters unbounded ``.bak.<timestamp>``
 files on every invocation. The source side of BOTH comparisons must be
-normalised too, i.e. three substitutions, not one.
+normalised too, i.e. three normalisation sites, not one. (The fourth site, the
+backup copy, must stay RAW — see test 5.)
 
 No Windows host is available, so the issue's criterion "``Workflow`` launches
 from a stock Windows install" is discharged transitively: the permission layer
@@ -43,11 +44,11 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-INSTALL_SH = REPO_ROOT / "install.sh"
+INSTALL_MJS = REPO_ROOT / "install.mjs"
 
-requires_bash = pytest.mark.skipif(
-    shutil.which("bash") is None,
-    reason="install.sh is bash-only; nothing to test on a host without bash",
+requires_node = pytest.mark.skipif(
+    shutil.which("node") is None,
+    reason="install.mjs is a Node script; nothing to test without a node binary",
 )
 requires_git_repo = pytest.mark.skipif(
     shutil.which("git") is None or not (REPO_ROOT / ".git").exists(),
@@ -55,7 +56,7 @@ requires_git_repo = pytest.mark.skipif(
 )
 
 # Source artifact -> installed destination, relative to CLAUDE_HOME. One entry
-# per loop in install.sh so all five artifact classes are exercised.
+# per loop in install.mjs so all five artifact classes are exercised.
 ARTIFACTS: dict[str, str] = {
     "skills/demo.md": "skills/demo/SKILL.md",
     "agents/a.md": "agents/a.md",
@@ -74,10 +75,17 @@ CONTENTS: dict[str, str] = {
 
 
 def _build_pack(root: Path, *, crlf: bool) -> Path:
-    """Create a throwaway artifact pack next to a copy of the real install.sh."""
+    """Create a throwaway artifact pack next to a copy of the real install.mjs.
+
+    ``install.mjs`` resolves its five source directories relative to its OWN
+    location (``import.meta.url``), not ``process.cwd()`` — exactly like the
+    bash installer's ``SCRIPT_DIR`` trick — so a copy dropped next to a
+    throwaway source tree works standalone. It imports no repo-local module
+    (Node builtins only), so nothing else needs copying.
+    """
     pack = root / "pack"
     pack.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(INSTALL_SH, pack / "install.sh")
+    shutil.copy2(INSTALL_MJS, pack / "install.mjs")
     for rel, text in CONTENTS.items():
         src = pack / rel
         src.parent.mkdir(parents=True, exist_ok=True)
@@ -100,7 +108,7 @@ def _run_install(pack: Path, claude_home: Path, *args: str) -> subprocess.Comple
     env["HOME"] = str(claude_home.parent / "fake-home")
     Path(env["HOME"]).mkdir(parents=True, exist_ok=True)
     return subprocess.run(
-        ["bash", str(pack / "install.sh"), *args],
+        ["node", str(pack / "install.mjs"), *args],
         capture_output=True,
         text=True,
         env=env,
@@ -134,7 +142,7 @@ def _count_cr_bytes(root: Path) -> int:
 
 
 # ── 1. Part 1 core ───────────────────────────────────────────────────────────
-@requires_bash
+@requires_node
 def test_install_strips_crlf_from_all_artifact_classes(tmp_path: Path) -> None:
     pack = _build_pack(tmp_path, crlf=True)
     claude_home = tmp_path / "claude"
@@ -154,7 +162,7 @@ def test_install_strips_crlf_from_all_artifact_classes(tmp_path: Path) -> None:
 
 
 # ── 2. THE TRAP: idempotency on a CRLF source ────────────────────────────────
-@requires_bash
+@requires_node
 def test_second_run_is_idempotent_on_crlf_source(tmp_path: Path) -> None:
     pack = _build_pack(tmp_path, crlf=True)
     claude_home = tmp_path / "claude"
@@ -177,7 +185,7 @@ def test_second_run_is_idempotent_on_crlf_source(tmp_path: Path) -> None:
 
 
 # ── 3. THE TRAP: --check in sync after installing from CRLF ──────────────────
-@requires_bash
+@requires_node
 def test_check_mode_reports_in_sync_after_install_from_crlf_source(tmp_path: Path) -> None:
     pack = _build_pack(tmp_path, crlf=True)
     claude_home = tmp_path / "claude"
@@ -193,7 +201,7 @@ def test_check_mode_reports_in_sync_after_install_from_crlf_source(tmp_path: Pat
 
 
 # ── 4. Normalisation must not blind the drift check ──────────────────────────
-@requires_bash
+@requires_node
 def test_check_still_detects_real_drift(tmp_path: Path) -> None:
     pack = _build_pack(tmp_path, crlf=True)
     claude_home = tmp_path / "claude"
@@ -213,7 +221,7 @@ def test_check_still_detects_real_drift(tmp_path: Path) -> None:
 
 
 # ── 5. Migration path: a pre-existing CRLF install ───────────────────────────
-@requires_bash
+@requires_node
 def test_preexisting_crlf_install_is_migrated_once(tmp_path: Path) -> None:
     pack = _build_pack(tmp_path, crlf=True)
     claude_home = tmp_path / "claude"
@@ -232,7 +240,7 @@ def test_preexisting_crlf_install_is_migrated_once(tmp_path: Path) -> None:
     backups = _backups(claude_home)
     assert len(backups) == len(ARTIFACTS), "exactly one backup per file on migration"
     # The backup must be a FAITHFUL snapshot of the pre-overwrite destination,
-    # CRs included — install.sh must not normalise `cp "$dst" "$backup"`.
+    # CRs included — install.mjs must not normalise its copyFileSync backup.
     assert all(b"\r\n" in b.read_bytes() for b in backups)
 
     for rel, dest_rel in ARTIFACTS.items():
@@ -246,7 +254,7 @@ def test_preexisting_crlf_install_is_migrated_once(tmp_path: Path) -> None:
 
 
 # ── 6. Zero regression for existing Linux/macOS users ────────────────────────
-@requires_bash
+@requires_node
 def test_lf_source_install_is_unchanged_by_normalisation(tmp_path: Path) -> None:
     pack = _build_pack(tmp_path, crlf=False)
     claude_home = tmp_path / "claude"
@@ -268,7 +276,7 @@ def test_gitattributes_forces_lf() -> None:
 
     paths = [
         "workflows/orchemist-wave.js",
-        "install.sh",
+        "install.mjs",
         "skills/orchemist-run.md",
         "pipelines/coding-pipeline-standard.yaml",
     ]
@@ -287,8 +295,20 @@ def test_gitattributes_forces_lf() -> None:
 # ── 8. Simulated Windows clone (closest Linux-executable proxy) ──────────────
 @requires_git_repo
 def test_simulated_windows_clone_has_no_cr(tmp_path: Path) -> None:
+    # A shallow checkout (CI's default `actions/checkout` fetch-depth, a
+    # `--depth 1` developer clone) cannot be cloned from. Detect that up front
+    # and SKIP — the previous `check=True` turned it into an ERROR, which is a
+    # missing environment, not a failed contract.
+    shallow = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "--is-shallow-repository"],
+        capture_output=True,
+        text=True,
+    )
+    if shallow.returncode != 0 or shallow.stdout.strip() == "true":
+        pytest.skip("REPO_ROOT is a shallow checkout — cannot clone from it")
+
     clone = tmp_path / "winclone"
-    subprocess.run(
+    cloned = subprocess.run(
         [
             "git",
             "-c",
@@ -301,8 +321,9 @@ def test_simulated_windows_clone_has_no_cr(tmp_path: Path) -> None:
         ],
         capture_output=True,
         text=True,
-        check=True,
     )
+    if cloned.returncode != 0:
+        pytest.skip(f"cannot clone REPO_ROOT in this environment:\n{cloned.stderr}")
 
     cr_bytes = _count_cr_bytes(clone)
     assert cr_bytes == 0, (

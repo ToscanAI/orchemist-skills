@@ -13,10 +13,12 @@ The Orchemist coding pipeline lives in a Python/FastAPI engine ([the main repo](
 ```bash
 git clone https://github.com/ToscanAI/orchemist-skills.git
 cd orchemist-skills
-./install.sh
+npm run install:pack
 ```
 
-This copies the skills to `~/.claude/skills/`, subagents to `~/.claude/agents/`, pipeline YAMLs to `~/.claude/skills/orchemist/pipelines/`, and tiering profiles to `~/.claude/skills/orchemist/profiles/`. Running `./install.sh` twice is safe — it backs up any existing files to `<name>.bak.<UTC-timestamp>` and then reports an unchanged state on the second run.
+The installer is a dependency-free Node script (`install.mjs`), so it runs the same on Linux, macOS, and Windows/PowerShell — Node 18+ is the only prerequisite.
+
+This copies the skills to `~/.claude/skills/`, subagents to `~/.claude/agents/`, pipeline YAMLs to `~/.claude/skills/orchemist/pipelines/`, and tiering profiles to `~/.claude/skills/orchemist/profiles/`. Running `npm run install:pack` twice is safe — it backs up any existing files to `<name>.bak.<UTC-timestamp>` and then reports an unchanged state on the second run. Use `npm run install:pack -- --check` for a read-only dry run that reports whether the installed copy is in sync (exit 0) or has drifted (exit 1).
 
 ### Tiering profiles (optional)
 

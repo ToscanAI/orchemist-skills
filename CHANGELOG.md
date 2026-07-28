@@ -4,6 +4,24 @@ All notable changes to the orchemist-skills pack are recorded here. The pipeline
 
 This changelog uses [Semantic Versioning](https://semver.org/) for the pipeline YAML version field.
 
+## [node-installer] — 2026-07-28
+
+### Changed — `install.sh` replaced by `install.mjs` + `npm run install:pack` (closes [#52](https://github.com/ToscanAI/orchemist-skills/issues/52); follow-up to [#50](https://github.com/ToscanAI/orchemist-skills/issues/50))
+
+The bash installer shelled out to `cp`, `cmp`, `mkdir -p`, `date -u`, `basename` and read `$HOME` directly — all POSIX-only, so a Windows user with only PowerShell (no Git Bash, no WSL) had no supported install path even though the pack itself is plain markdown/YAML/JS. `install.mjs` is a faithful, behaviour-for-behaviour port using Node builtins only (`node:fs`, `node:path`, `node:os`, `node:process`, `node:url`) and zero dependencies. Same exit-code contract (unknown flag → 2, missing source dir → 1, `--check` in-sync → 0 / drifted → 1, install → 0), same six per-file report-line formats, same section headers, same `Checked:` summary, same closing banner. `install.sh` is **deleted**, not kept alongside — one implementation to keep in sync, and it is testable on Linux.
+
+- **Entry points:** `npm run install:pack` (install) and `npm run install:pack -- --check` (read-only dry run). `npm run install-skills` and the `orchemist-skills-install` bin both repoint to the same script, so prior muscle memory keeps working.
+- **Cross-platform correctness by construction:** every path goes through `path.join()` (never string concatenation), and the install target resolves as `CLAUDE_HOME` if set, else `path.join(os.homedir(), '.claude')` — Node's own primitive, rather than a hand-rolled `HOME`/`USERPROFILE` branch.
+- **#50's CRLF guarantees preserved exactly:** the source side of BOTH comparisons (install and `--check`) and the write are LF-normalised by removing every `0x0D` byte — a byte-level strip, not a `\r\n` → `\n` text replace — while the pre-overwrite backup stays RAW, so a backup remains a byte-faithful snapshot. `tests/test_install_crlf_normalization.py` now drives `install.mjs` and still locks all of it in.
+- **Ordering:** `fs.readdirSync()` returns raw OS directory order, so every artifact class sorts its filenames explicitly to reproduce bash glob ordering in the per-file report lines.
+- `.gitattributes` gains an explicit `*.mjs text eol=lf` entry; the `*.sh` rule stays (`scripts/retro-loop-quarterly.sh`).
+- **Docs:** README quick-start and `docs/tiering-profiles.md` now reference `npm run install:pack`.
+
+### Fixed
+
+- `skills/orchemist-run.md` COMMAND-VERIFY prose no longer implies that piping into `Get-FileHash` hashes the piped content. PowerShell binds a piped string to `-Path`, so `git show HEAD:<file> | Get-FileHash` tries to open a file *named* after those bytes; the guidance now says to redirect to a temp file or pass `-InputStream`.
+- `tests/test_install_crlf_normalization.py`'s simulated-Windows-clone test now SKIPs (rather than ERRORing) on a shallow checkout, which cannot be cloned from.
+
 ## [content-pipeline] — 2026-07-23
 
 ### Added — coding-adapted content pipeline: `pipelines/content-pipeline.yaml` (closes [#44](https://github.com/ToscanAI/orchemist-skills/issues/44); refs [ToscanAI/orchemist#1055](https://github.com/ToscanAI/orchemist/issues/1055))

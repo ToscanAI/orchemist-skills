@@ -54,9 +54,10 @@ profiles:
   `default`) — see `tests/tiering_profiles.py` / `tests/test_tiering_profiles.py` case (g).
 
 A "consumer copy" means editing the **installed** registry
-`~/.claude/skills/orchemist/profiles/tiering-profiles.yaml`. After you edit it, `install.sh --check`
+`~/.claude/skills/orchemist/profiles/tiering-profiles.yaml`. After you edit it,
+`npm run install:pack -- --check`
 will report a `MISMATCH` for that file — that is expected and harmless for a consumer-local
-profile. Re-running `install.sh` **backs the file up** (`.bak.<UTC-timestamp>`) rather than
+profile. Re-running `npm run install:pack` **backs the file up** (`.bak.<UTC-timestamp>`) rather than
 destroying your edits.
 
 ## The Fable gate-invariant (non-negotiable)

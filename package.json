@@ -29,15 +29,16 @@
     "pipelines/",
     "profiles/",
     "examples/",
-    "install.sh",
+    "install.mjs",
     "LICENSE",
     "README.md"
   ],
   "bin": {
-    "orchemist-skills-install": "./install.sh"
+    "orchemist-skills-install": "./install.mjs"
   },
   "scripts": {
-    "install-skills": "./install.sh"
+    "install:pack": "node install.mjs",
+    "install-skills": "node install.mjs"
   },
   "engines": {
     "node": ">=18"
