@@ -1,15 +1,20 @@
 export const meta = {
   name: 'orchemist-wave',
   description:
-    'Parallel "wave" orchestrator for Orchemist: fan N independent, file-disjoint lanes through a per-lane pipeline — mode:"refactor" runs implement → independent fable review; mode:"maintenance" runs the maintenance pipeline per lane (spec → fable spec-adversary → implement+focused-test → independent fable review); mode:"codemod" runs a behavior-preserving lint/codemod cleanup WITH the same spec + fable spec-adversary planning gate (spec → fable spec-adversary → codemod-implement → independent fable review, no new test); mode:"content" runs the content pipeline per lane (research → draft(opus, real committed diff) → fact_check(fable gate) → red_team(fable gate), each gate with one bounded re-draft) for in-app content authored as a code diff. Per-lane lockstep, each lane sealed in its own git worktree. Produces reviewed, pushed branches + per-lane merge-readiness verdicts. Does NOT merge — the merge-coordination (branch-protection toggle + squash-merge + composition full-suite) stays a deliberate, outward-facing operator step.',
+    'Parallel "wave" orchestrator for Orchemist: fan N independent, file-disjoint lanes through a per-lane pipeline — mode:"refactor" runs implement → independent fable review; mode:"maintenance" runs the maintenance pipeline per lane (spec → fable spec-adversary → implement+focused-test → independent fable review); mode:"codemod" runs a behavior-preserving lint/codemod cleanup WITH the same spec + fable spec-adversary planning gate (spec → fable spec-adversary → codemod-implement → independent fable review, no new test); mode:"content" runs the content pipeline per lane (research → draft(opus, real committed diff) → fact_check(fable gate) → red_team(fable gate), each gate with one bounded re-draft) for in-app content authored as a code diff; mode:"standard" runs the full sealed-acceptance flow per lane for NEW, file-disjoint, sealable behavior (spec → behavioral → spec_adversary(fable) → acceptance_test(orchemist-tester) → pre-flight RED → test_adversary(fable) → SEAL(sha256-hash + commit) → implement → acceptance_run (re-hash) → review(fable)). Per-lane lockstep, each lane sealed in its own git worktree. Produces reviewed, pushed branches + per-lane merge-readiness verdicts. Does NOT merge — the merge-coordination (branch-protection toggle + squash-merge + composition full-suite) stays a deliberate, outward-facing operator step.',
   whenToUse:
-    'When several file-DISJOINT lanes are ready at once. mode:"refactor" (default) — behavior-preserving changes (a god-module decomposition, a mechanical codemod); each lane needs an immutable contract (a surface/contract test + the full suite). mode:"maintenance" — a batch of independent bug/infra/CI/data fixes; each lane runs the maintenance pipeline (spec → fable adversary → implement + a FOCUSED test → fable review), the right-sized flow that adds behavior + tests (NOT behavior-preserving). mode:"codemod" — the middle ground: a behavior-preserving lint/codemod cleanup (e.g. driving a per-package bulk-suppression baseline to zero) that still wants the spec + fable-adversary planning gate but adds NO behavior and NO new test. mode:"content" — a batch of independent in-app CONTENT modules (a gated route-page + a data-file entry + a curated link/video allowlist), each authored as a real committed diff and gated by a source-grounded fact_check + an IP/brand red_team (both fable, blocking); pre-place each lane\'s operator-refined source_material.md and pass its absolute path as lane.sourceFile. Rule of thumb: serialize lanes WITHIN one module (same files), parallelize ACROSS modules (disjoint dirs compose cleanly).',
+    'When several file-DISJOINT lanes are ready at once. mode:"refactor" (default) — behavior-preserving changes (a god-module decomposition, a mechanical codemod); each lane needs an immutable contract (a surface/contract test + the full suite). mode:"maintenance" — a batch of independent bug/infra/CI/data fixes; each lane runs the maintenance pipeline (spec → fable adversary → implement + a FOCUSED test → fable review), the right-sized flow that adds behavior + tests (NOT behavior-preserving). mode:"codemod" — the middle ground: a behavior-preserving lint/codemod cleanup (e.g. driving a per-package bulk-suppression baseline to zero) that still wants the spec + fable-adversary planning gate but adds NO behavior and NO new test. mode:"content" — a batch of independent in-app CONTENT modules (a gated route-page + a data-file entry + a curated link/video allowlist), each authored as a real committed diff and gated by a source-grounded fact_check + an IP/brand red_team (both fable, blocking); pre-place each lane\'s operator-refined source_material.md and pass its absolute path as lane.sourceFile. mode:"standard" — a batch of independent NEW, file-disjoint, sealable-behavior modules (e.g. a Black-Scholes engine + indicator modules) that need the FULL sealed-acceptance bar (spec → behavioral → spec_adversary(fable) → acceptance_test(orchemist-tester) → pre-flight RED → test_adversary(fable) → SEAL → implement → acceptance_run → review(fable)) — stronger than mode:"maintenance"\'s single spec-adversary gate + focused test. Rule of thumb: serialize lanes WITHIN one module (same files), parallelize ACROSS modules (disjoint dirs compose cleanly).',
   phases: [
-    { title: 'Spec', detail: 'maintenance + codemod modes — spec + fable spec-adversary per lane (the pre-implement quality gate)', model: 'fable' },
+    { title: 'Spec', detail: 'maintenance + codemod + standard modes — spec + fable spec-adversary per lane (the pre-implement quality gate)', model: 'fable' },
     { title: 'Research', detail: 'content mode — one general-purpose (sonnet) per lane: web-verify links/videos + confirm the correctness anchors', model: 'sonnet' },
-    { title: 'Implement', detail: 'refactor/maintenance/codemod modes — one orchemist-implementer (opus) per lane, sealed in its own git worktree', model: 'opus' },
+    { title: 'Behavioral', detail: 'standard mode — one general-purpose (sonnet) per lane derives numbered "When X, the system Y" contracts from spec.observable_outcomes', model: 'sonnet' },
+    { title: 'Acceptance Test', detail: 'standard mode — orchemist-tester (sonnet) authors the sealed test from behavioral.contracts alone, no implementation access', model: 'sonnet' },
+    { title: 'Test Adversary', detail: 'standard mode — an independent fable gate pressure-tests the sealed test for specificity/leakage/trivial-satisfaction against the pre-flight RED evidence', model: 'fable' },
+    { title: 'Seal', detail: 'standard mode — one general-purpose (sonnet) per lane re-hashes + commits + pushes the immutable sealed test — the first git-write for the lane', model: 'sonnet' },
+    { title: 'Implement', detail: 'refactor/maintenance/codemod/standard modes — one orchemist-implementer (opus) per lane, sealed in its own git worktree', model: 'opus' },
+    { title: 'Acceptance Run', detail: 'standard mode — a verification-only general-purpose (sonnet) dispatch re-hashes the seal and runs the sealed test + full suite, no code-writing', model: 'sonnet' },
     { title: 'Draft', detail: 'content mode — one orchemist-implementer (opus) per lane authors the content as a real committed diff (+ bounded gate re-drafts)', model: 'opus' },
-    { title: 'Review', detail: 'refactor/maintenance/codemod modes — one independent fable reviewer per lane — verify, do not trust', model: 'fable' },
+    { title: 'Review', detail: 'refactor/maintenance/codemod/standard modes — one independent fable reviewer per lane — verify, do not trust', model: 'fable' },
     { title: 'Fact-check', detail: 'content mode — a source-grounded fable gate: every claim traces to a source, every link/video web-verified', model: 'fable' },
     { title: 'Red-team', detail: 'content mode — an IP/brand/claim-support fable gate (orchemist-adversary, reads the captured diff)', model: 'fable' },
   ],
@@ -18,7 +23,7 @@ export const meta = {
 // ─────────────────────────────────────────────────────────────────────────────
 // orchemist-wave — the parallel fan-out we run by hand, encoded deterministically.
 //
-// THREE modes, same skeleton (pipeline() = per-lane lockstep, no barrier between
+// FIVE modes, same skeleton (pipeline() = per-lane lockstep, no barrier between
 // lanes; each lane sealed in its own git worktree so concurrent lanes never
 // collide on the git index; the implementer pushes its branch, the reviewer
 // fetches + diffs it):
@@ -39,6 +44,17 @@ export const meta = {
 //     behavior, NO new test; the reviewer's durable gate is that the target
 //     suppression file SHRANK (fix-then-`eslint --prune-suppressions`), not a
 //     focused test.
+//   • mode:"content"    — research(sonnet) → draft(opus, real committed diff) →
+//     fact_check(fable gate) → red_team(fable gate), each gate with one bounded
+//     re-draft, for in-app content authored as a code diff.
+//   • mode:"standard"   — the full sealed-acceptance flow per lane, mirroring
+//     `pipelines/coding-pipeline-standard.yaml`: spec → behavioral →
+//     spec_adversary(fable) → acceptance_test(orchemist-tester) → pre-flight RED
+//     → test_adversary(fable) → SEAL(sha256-hash + commit) → implement →
+//     acceptance_run(re-hash) → review(fable). Lanes carry NEW, sealable
+//     behavior gated by an IMMUTABLE, hashed acceptance test — the implementer
+//     must make the sealed test pass and must NOT modify it. NOT behavior-
+//     preserving; there is no surface-diff/facade invariant.
 //
 // WHY the merge is NOT here: toggling branch protection + squash-merging to a
 // shared default branch + the post-merge composition suite are outward-facing and
@@ -47,7 +63,7 @@ export const meta = {
 //
 // ── args contract ────────────────────────────────────────────────────────────
 //   args = {
-//     mode:          "maintenance",                // "refactor" (default) | "maintenance" | "codemod" | "content"
+//     mode:          "maintenance",                // "refactor" (default) | "maintenance" | "codemod" | "content" | "standard"
 //     tiering_profile: "default",                  // "default" | "budget-first" | "quality-first" (profiles/tiering-profiles.yaml)
 //     repo:          "ToscanAI/value-investing",
 //     base:          "main",
@@ -86,14 +102,18 @@ if (lanes.length === 0) {
   return { ready: false, lanes: [], note: 'no lanes provided' }
 }
 
-const mode = A.mode === 'maintenance' ? 'maintenance' : A.mode === 'codemod' ? 'codemod' : A.mode === 'content' ? 'content' : 'refactor'
+const mode = A.mode === 'maintenance' ? 'maintenance' : A.mode === 'codemod' ? 'codemod' : A.mode === 'content' ? 'content' : A.mode === 'standard' ? 'standard' : 'refactor'
 const repo = A.repo || '(repo unset)'
 const base = A.base || 'main'
-const suiteCmd = A.suiteCmd || (mode === 'maintenance' ? 'the repo typecheck/build/lint gate' : mode === 'codemod' ? 'the repo lint + typecheck + full-suite gate' : mode === 'content' ? 'the repo typecheck + lint + focused unit-test gate' : 'python3 -m pytest -q')
+const suiteCmd = A.suiteCmd || (mode === 'maintenance' ? 'the repo typecheck/build/lint gate' : mode === 'codemod' ? 'the repo lint + typecheck + full-suite gate' : mode === 'content' ? 'the repo typecheck + lint + focused unit-test gate' : mode === 'standard' ? 'the sealed acceptance test + the repo full suite' : 'python3 -m pytest -q')
 
 // content mode: absolute host path where the draft captures its diff for the Bash-less
 // red-team gate to Read (the orchemist-adversary has no git). lane.id is unique per wave.
 const contentDiffPath = (lane) => `/tmp/orchemist-wave-content/${lane.id}.diff`
+// standard mode: absolute host DIRECTORY where acceptance_test authors the sealed test (before any
+// worktree/branch exists — orchemist-tester has no Bash/git, mirrors contentDiffPath's role for the
+// Bash-less red-team, generalized to a directory since the filename/extension is language-dependent).
+const standardTestPath = (lane) => `/tmp/orchemist-wave-standard/${lane.id}`
 const expectedSuite = A.expectedSuite || '(unspecified — match the pre-wave green baseline)'
 const facadeTest = A.facadeTest || ''
 const invariant =
@@ -104,6 +124,8 @@ const invariant =
     ? 'Behavior-preserving codemod/lint cleanup — behavior 100% UNCHANGED; NO new behavior, NO new test. Each fix is EITHER auto-fixable-style (`eslint --fix`) OR an inline `// eslint-disable-next-line <rule> -- <reason>` with a REAL one-line rationale for a genuinely load-bearing case (never a blanket re-suppress). **Behavior-preserving boundary:** type-only narrowing that leaves the runtime path unchanged (a non-null assertion `arr[i]!`, an `as`-narrowing, a type guard that does NOT alter emitted control flow) IS the behavior-preserving path and is PERMITTED; any fix that changes a runtime-observable path (introducing a `?.` short-circuit, a guard/throw/early-return, a changed value) must instead be a pre-declared `residual` with a rationale, OR be routed OUT of the codemod lane into a maintenance lane. The public surface + every caller import path stay byte-identical. Do NOT modify tests EXCEPT to drop a now-unnecessary suppression. Preserve every UNRELATED seal pin. Edit ONLY the planned files. middleware HARD-NO.'
     : mode === 'content'
     ? 'In-app CONTENT authored as a real committed diff. Author ORIGINAL explainers in OUR OWN VOICE — never reproduce source prose. DROP all proprietary "Rule #1"/"Rule One"/product-version branding. Every FACTUAL claim must trace to the pre-placed source_material.md OR an authoritative source verified during research; every curated link must RESOLVE; every video ID + its stated duration must be WEB-VERIFIED (no fabrication — a fabricated duration is a hard defect). Honor the correctness anchors named in the source material (e.g. option SELLER = obligation + collects premium). Options content MUST carry the asymmetric-risk + education-not-advice framing. Edit ONLY the planned disjoint files (do not touch a sibling lane\'s file or any shared/pre-wired file); existing content stays unchanged. middleware HARD-NO.'
+    : mode === 'standard'
+    ? 'NEW, sealable behavior gated by an immutable, adversarially-reviewed acceptance test — you MUST make the sealed test pass; you MUST NOT modify, delete, or work around the sealed test file under any path (an apparent test defect is a BLOCKED report, never a silent edit). This is NOT a behavior-preserving refactor — there is no surface-diff/facade requirement. Edit ONLY the planned files. middleware HARD-NO.'
     : 'Behavior 100% unchanged; the public surface and every caller import path stay byte-identical; do NOT modify any tests.')
 
 // ── #41 tiering-profile effort (Workflow path — the one path that CAN pass per-phase effort) ──
@@ -133,6 +155,7 @@ const IMPL_SCHEMA = {
     facade_test: { type: 'string', description: 'refactor mode: PASS/FAIL of the contract/surface test' },
     files: { type: 'array', items: { type: 'string' }, description: 'files created/changed' },
     notes: { type: 'string', description: 'anything the reviewer should scrutinize: seal-breaks, deviations, BLOCKED reasons' },
+    seal_verified: { type: 'boolean', description: 'standard mode: true iff the implementer re-hashed the sealed test at entry AND at pre-push and both matched the sealed sha256' },
   },
 }
 
@@ -157,6 +180,7 @@ const SPEC_SCHEMA = {
     plan: { type: 'string', description: 'the focused implementation plan: exact files to touch, the approach, the seal surface to AVOID, the VALIDATION plan (focused test or prod-validation)' },
     files: { type: 'array', items: { type: 'string' } },
     validation: { type: 'string', description: 'focused-test (and which) OR prod-validation steps' },
+    observable_outcomes: { type: 'string', description: 'for each change, what a caller/test can OBSERVE (return values, exact output, error messages) — the behavioral phase turns this into contracts' },
   },
 }
 
@@ -184,6 +208,71 @@ const CONTENT_IMPL_SCHEMA = {
     diff_path: { type: 'string', description: 'absolute path where the full `git diff base...HEAD` was captured for the red-team' },
     files: { type: 'array', items: { type: 'string' }, description: 'files created/changed' },
     notes: { type: 'string', description: 'anything the gates should scrutinize: deviations, BLOCKED reasons' },
+  },
+}
+
+// standard mode — behavioral contracts (WHAT, not HOW) derived from spec.observable_outcomes.
+const BEHAVIORAL_SCHEMA = {
+  type: 'object',
+  additionalProperties: true,
+  required: ['contracts'],
+  properties: {
+    contracts: { type: 'string', description: 'numbered behavioral contracts ("When X, the system Y") — observable inputs/outputs only, no internal names' },
+    contract_count: { type: 'number', description: 'count of numbered contracts — acceptance_test cross-checks its own coverage against this' },
+  },
+}
+
+// standard mode — orchemist-tester's output (no Bash: writes to standardTestPath, not the repo).
+const SEALED_TEST_SCHEMA = {
+  type: 'object',
+  additionalProperties: true,
+  required: ['test_path', 'dest_path'],
+  properties: {
+    test_path: { type: 'string', description: 'absolute scratch path the test was written to (under standardTestPath(lane))' },
+    dest_path: { type: 'string', description: 'the intended repo-relative destination path (e.g. tests/test_black_scholes.py) — preflight/SEAL/implement copy the file here' },
+    contracts_covered: { type: 'number', description: 'count of behavioral contracts asserted — cross-checked against behavioral.contract_count' },
+    summary: { type: 'string', description: 'one line per test/section naming which contract it covers' },
+  },
+}
+
+// standard mode — the pre-flight RED confirmation (needs Bash; orchemist-tester has none).
+const PREFLIGHT_SCHEMA = {
+  type: 'object',
+  additionalProperties: true,
+  required: ['status', 'seal_sha256'],
+  properties: {
+    status: { type: 'string', enum: ['red', 'unexpected_pass', 'error'], description: "'red' = the sealed test ran and failed as expected (no implementation exists yet); 'unexpected_pass' = a contract was trivially satisfiable with no impl — hand to test_adversary as a finding; 'error' = the test could not even execute (syntax/import error)" },
+    seal_sha256: { type: 'string', description: 'sha256 of the copied test file at dest_path — the value test_adversary/SEAL/implement/acceptance_run/review all cross-check against' },
+    evidence: { type: 'string', description: "the RED run's output summary (fail count + first few failure lines) — handed to test_adversary as pre-flight evidence" },
+  },
+}
+
+// standard mode — the seal commit.
+const SEAL_SCHEMA = {
+  type: 'object',
+  additionalProperties: true,
+  required: ['status'],
+  properties: {
+    status: { type: 'string', enum: ['sealed', 'blocked'], description: "'sealed' only if the re-hash matched the preflight seal_sha256 AND the SEAL commit is pushed; else 'blocked'" },
+    seal_sha256: { type: 'string' },
+    pushed_sha: { type: 'string', description: 'full sha of the pushed SEAL commit' },
+    notes: { type: 'string' },
+  },
+}
+
+// standard mode — acceptance_run: verification-only, no code-writing.
+const ACCEPTANCE_RUN_SCHEMA = {
+  type: 'object',
+  additionalProperties: true,
+  required: ['seal_intact', 'passed', 'failed'],
+  properties: {
+    seal_intact: { type: 'boolean', description: 're-computed sha256 of dest_path still equals the recorded seal_sha256' },
+    seal_sha256: { type: 'string' },
+    passed: { type: 'number' },
+    failed: { type: 'number' },
+    total: { type: 'number' },
+    suite: { type: 'string', description: 'the full-suite result line' },
+    notes: { type: 'string' },
   },
 }
 
@@ -495,7 +584,227 @@ ${invariant}
 Return the StructuredOutput: status ('pushed' only if green + pushed; else 'blocked'), pushed_sha, suite, diff_path='${contentDiffPath(lane)}', files, notes. If you cannot get green, status='blocked', do NOT push, explain in notes.`
 }
 
-log(`orchemist-wave [${mode}]: ${lanes.length} lane(s) off ${repo}@${base} — ${mode === 'maintenance' ? 'spec → fable adversary → implement → fable review' : mode === 'codemod' ? 'spec → fable adversary → codemod-implement → fable review' : mode === 'content' ? 'research → draft (opus, worktree) → fact_check (fable gate) → red_team (fable gate)' : 'implement (opus, worktree) → fable review'}, per-lane lockstep. Merge stays an operator step.`)
+// ── standard-mode prompts (sealed-acceptance flow per lane, mirrors coding-pipeline-standard.yaml) ──
+function standardSpecPrompt(lane) {
+  return `You are the SPEC agent for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Produce a FOCUSED implementation plan for this NEW, sealable-behavior module (Section B: Implementation Guidance — problem statement, files to touch, implementation steps, risk assessment). READ-ONLY — no code edits, no worktree.
+
+## The change
+${lane.implement}
+
+## Files this lane may touch
+${lane.files || '(infer from the change; keep it minimal + file-disjoint from sibling lanes)'}
+
+Recon the area-of-change in the repo, then plan: the EXACT files to create/edit, the approach, and — for EACH change — the OBSERVABLE OUTCOME a caller/test can see (return values, exact output, error messages; this feeds the next BEHAVIORAL phase directly). Do NOT propose a heavyweight sealed verify-script.
+
+Return the StructuredOutput: { plan: <the full plan>, files: [...], validation: <how this will be validated>, observable_outcomes: <for each change, what a caller/test can OBSERVE> }.`
+}
+
+function standardSpecRevisePrompt(lane, prevPlan, verdict) {
+  return `You are the SPEC agent REVISING the plan for standard-wave lane "${lane.id}" (issue #${lane.issue}). An independent fable adversary found problems with the plan and/or the behavioral contracts derived from it. Apply the VERBATIM fixes; keep everything else stable. READ-ONLY.
+
+## The change
+${lane.implement}
+
+## Previous plan
+${prevPlan}
+
+## Adversary findings (address every blocker)
+${(verdict.blockers || []).map((b, i) => `${i + 1}. ${b}`).join('\n') || verdict.notes || '(see notes)'}
+
+Return the StructuredOutput: { plan, files, validation, observable_outcomes } — the corrected plan.`
+}
+
+function standardBehavioralPrompt(lane, spec) {
+  return `You are the BEHAVIORAL agent for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Derive NUMBERED behavioral contracts from the spec's observable outcomes — WHAT the system does, never HOW it is implemented. READ-ONLY.
+
+## Spec — observable outcomes
+${spec.observable_outcomes || '(spec did not populate observable_outcomes — derive contracts from the plan itself)'}
+
+## Plan
+${spec.plan}
+
+## Rules
+1. Each contract reads "When X, the system Y" — an OBSERVABLE input/output only (return values, exact strings, error messages, exit codes). NEVER name an internal function/class/variable.
+2. Number every contract (feeds \`contract_count\` — acceptance_test cross-checks its own coverage against this number).
+3. Cover FOUR angles: happy path, error paths, edge cases, and interactions between the new pieces.
+
+Return the StructuredOutput: { contracts: <numbered "When X, the system Y" contracts>, contract_count: <the count> }.`
+}
+
+function standardSpecAdversaryPrompt(lane, spec, behavioral) {
+  return `You are the SPEC ADVERSARY (Fable 5) for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Independently pressure-test BOTH the plan and the behavioral contracts for this NEW, sealable-behavior module. READ-ONLY; verify against the REAL code.
+
+## The change
+${lane.implement}
+
+## Proposed plan
+${spec.plan}
+
+## Proposed behavioral contracts
+${behavioral.contracts}
+
+## Decisive checks
+1. SPECIFICITY — is every contract concrete (exact values/strings/errors), not vague?
+2. TRIVIAL-SATISFACTION — could a stub/no-op implementation pass any contract?
+3. EDGE-CASE COVERAGE — happy path, error paths, edge cases, interactions all present?
+4. LEAKAGE — does any contract name an internal function/class/variable instead of an observable?
+5. ALIGNMENT — do the contracts actually cover what the plan/issue describes, nothing missing?
+6. Scope: does the plan edit ONLY its files (file-disjoint from sibling lanes)? ${lane.reviewFocus || ''}
+
+Name BLOCKER / MAJOR / MINOR with a fix. Return the StructuredOutput: { verdict: APPROVE|REQUEST_CHANGES, blockers: [...], majors: [...], notes }.`
+}
+
+function standardAcceptanceTestPrompt(lane, spec, behavioral) {
+  return `You are the ACCEPTANCE_TEST agent (orchemist-tester) for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Author the SEALED acceptance test from the behavioral contracts ALONE — you have NO access to any implementation (none exists yet) and NO Bash/git. Write ONE test/section per contract.
+
+## Behavioral contracts (the ONLY source of truth — do not read/assume any implementation)
+${behavioral.contracts}
+
+## Where to write
+Write the test file(s) under \`${standardTestPath(lane)}\` (a scratch DIRECTORY outside the repo — you have no worktree). Choose the language/framework from repo context and name the file accordingly (e.g. \`test_black_scholes.py\`). Report the intended repo-relative destination as \`dest_path\` (e.g. \`tests/test_black_scholes.py\`).
+
+## Forbidden
+Never assert a private function/method/class NAME exists — assert only OBSERVABLE behavior (inputs/outputs), never internal structure (leakage).
+
+Return the StructuredOutput: { test_path: <absolute scratch path under ${standardTestPath(lane)}>, dest_path: <intended repo-relative path>, contracts_covered: <count>, summary: <one line per test naming which contract it covers> }.`
+}
+
+function standardAcceptanceTestRevisePrompt(lane, test, verdict) {
+  return `You are the ACCEPTANCE_TEST agent (orchemist-tester) REVISING the sealed test for standard-wave lane "${lane.id}" (issue #${lane.issue}) after test_adversary returned REQUEST_CHANGES. Apply the VERBATIM fixes; keep everything else stable — a surgical edit, not a rewrite. No Bash/git.
+
+## Previous test
+Read \`${test.test_path}\` (dest_path: \`${test.dest_path}\`).
+
+## Adversary findings (address every blocker)
+${(verdict.blockers || []).map((b, i) => `${i + 1}. ${b}`).join('\n') || verdict.notes || '(see notes)'}
+
+Re-write to the SAME \`${standardTestPath(lane)}\` scratch location and the SAME \`dest_path\`.
+
+Return the StructuredOutput: { test_path, dest_path, contracts_covered, summary } — the corrected test.`
+}
+
+function standardPreflightPrompt(lane, test) {
+  return `You are the PRE-FLIGHT agent for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Confirm the sealed test is RED (fails) against ZERO implementation, and hash it. You have Bash (orchemist-tester does not, which is why this is a separate dispatch).
+
+## Sealed scratch worktree (throwaway — no branch created/pushed here)
+1. \`git fetch origin --quiet\` then check out a fresh worktree from \`origin/${base}\` (no branch created — this dispatch is scratch/throwaway; nothing here persists past this dispatch).
+2. Copy the test from \`${test.test_path}\` (written under \`${standardTestPath(lane)}\`) to \`${test.dest_path}\` inside the worktree.
+
+## Run + hash
+1. Run the test file specifically. Expect EVERY assertion to FAIL or ERROR — no implementation exists yet. An assertion that passes with zero implementation is 'unexpected_pass' (a trivial/vacuous contract) — flag it in \`evidence\` for test_adversary.
+2. Compute the hash: \`sha256sum ${test.dest_path}\` (fall back to \`shasum -a 256 ${test.dest_path}\` if \`sha256sum\` is unavailable).
+
+Return the StructuredOutput: { status: 'red'|'unexpected_pass'|'error', seal_sha256: <the sha256 hex digest>, evidence: <fail count + first few failure lines, or the unexpected-pass/error detail> }.`
+}
+
+function standardTestAdversaryPrompt(lane, test, preflight) {
+  return `You are the TEST ADVERSARY (Fable 5) for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Pressure-test the sealed test's STRUCTURAL SOUNDNESS. READ-ONLY (Read/Grep only — you have no Bash/git, so you cannot independently re-run anything).
+
+## Pre-flight already confirmed this test is RED against zero implementation
+status = ${preflight.status} · seal_sha256 = ${preflight.seal_sha256}
+evidence = ${preflight.evidence || '(none)'}
+Treat pre-flight's RED confirmation as a precondition already satisfied — your job is structural soundness, not re-running it.
+
+## The sealed test
+Read \`${test.dest_path}\` (scratch copy at \`${test.test_path}\` under \`${standardTestPath(lane)}\`).
+
+## Decisive checks
+1. SPECIFICITY — every assertion concrete, not vague?
+2. TRIVIAL-SATISFACTION — could a stub/no-op pass? (cross-check any 'unexpected_pass' evidence above.)
+3. EDGE-CASE COVERAGE — happy path, error paths, edge cases, interactions?
+4. LEAKAGE — does any assertion name a private function/method/class instead of observable behavior?
+5. ALIGNMENT — does the test actually cover the behavioral contracts, nothing missing?
+6. 7d EXISTING-SYMBOLS CROSS-CHECK — does the test assume a symbol name that conflicts with something already in the repo?
+
+Name BLOCKER / MAJOR / MINOR with a fix. Return the StructuredOutput: { verdict: APPROVE|REQUEST_CHANGES, blockers: [...], majors: [...], notes }.`
+}
+
+function standardSealPrompt(lane, test, preflight) {
+  return `You are the SEAL agent for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. This is the FIRST git-write dispatch for this lane — you create + push the branch and commit the IMMUTABLE sealed test.
+
+## Sealed worktree — create the branch
+1. \`git fetch origin --quiet\` then \`git checkout -b ${lane.branch} origin/${base}\`.
+2. Copy the test from \`${test.test_path}\` (written under \`${standardTestPath(lane)}\`) to \`${test.dest_path}\`.
+
+## Re-verify the hash before you commit anything
+1. Compute \`sha256sum ${test.dest_path}\` (fall back to \`shasum -a 256\`).
+2. Compare it to the pre-flight seal_sha256 you were handed: \`${preflight.seal_sha256}\`. It MUST match byte-for-byte — nothing may have mutated the file since pre-flight.
+3. On MISMATCH: status='blocked', do NOT add/commit/push, explain in notes.
+
+## On match — seal it
+1. \`git add ${test.dest_path}\`.
+2. Commit: \`git commit -m "chore(#${lane.issue}): seal ${test.dest_path} — SEAL"\` with the sha256 recorded in the commit body.
+3. \`git push -u origin ${lane.branch}\` — the FIRST push of this lane's branch. Confirm local HEAD == pushed remote head.
+
+Return the StructuredOutput: { status: 'sealed'|'blocked', seal_sha256: <the re-computed hash>, pushed_sha: <full sha of the pushed SEAL commit>, notes }. 'sealed' ONLY if the re-hash matched AND the commit is pushed.`
+}
+
+function standardImplementPrompt(lane, seal) {
+  return `You are the IMPLEMENTER for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. This lane carries NEW, sealable behavior gated by an IMMUTABLE sealed acceptance test that is ALREADY committed and pushed.
+
+## Sealed worktree — pick up the ALREADY-pushed branch
+1. \`git fetch origin --quiet\` then \`git checkout -B ${lane.branch} origin/${lane.branch}\` (the SEAL dispatch already created + pushed this branch with the sealed test committed — do NOT branch fresh off ${base}).
+2. Re-hash the sealed test AT ENTRY: \`sha256sum\` the sealed test path and compare to the recorded \`${seal.seal_sha256}\`. A mismatch is an IMMEDIATE BLOCKED — do not proceed.
+
+## IMMUTABLE CONSTRAINT — non-negotiable
+${invariant}
+An apparent defect in the sealed test is a BLOCKED report, never a silent edit/work-around. You MUST NOT modify, delete, rename, or otherwise touch the sealed test file under any path.
+
+## The change (lane-specific)
+${lane.implement}
+
+## Files you may edit (ONLY these — never the sealed test)
+${lane.files || '(per the plan — minimal + file-disjoint from sibling lanes)'}
+
+## Validate — ALL must pass before you push
+1. Write the implementation. Re-hash the sealed test again BEFORE you commit (paranoia: confirm your own edits never touched it) — it must STILL equal \`${seal.seal_sha256}\`.
+2. Run \`${suiteCmd}\` — the sealed test AND the full suite must be green.
+3. Commit ONLY your implementation files (never the sealed test), \`git push origin ${lane.branch}\`. Confirm local HEAD == pushed.
+
+Return the StructuredOutput: status ('pushed' only if green + pushed; else 'blocked'), pushed_sha, suite (the result line), files, seal_verified (true iff BOTH re-hashes matched \`${seal.seal_sha256}\`), notes (seal-breaks, deviations, BLOCKED reasons — an apparent test defect goes here, never a silent edit). If you cannot get green WITHOUT touching the sealed test, status='blocked', do NOT push, explain in notes.`
+}
+
+function standardAcceptanceRunPrompt(lane, impl, seal) {
+  return `You are the ACCEPTANCE_RUN agent for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. VERIFICATION-ONLY — you do NOT write code and you do NOT fix failures, you only observe and report.
+
+## Sealed worktree — check out the pushed implement branch
+1. \`git fetch origin --quiet\` then \`git checkout -B ${lane.branch} origin/${lane.branch}\` (the implement dispatch already pushed this branch).
+
+## Re-verify the hash a THIRD time
+1. Compute \`sha256sum\` of the sealed test path and compare to the recorded \`${seal.seal_sha256}\`.
+2. Set \`seal_intact\` = true iff it matches exactly.
+
+## Run — the sealed test specifically, then the full suite
+1. Run the sealed test file alone; record pass/fail/total.
+2. Run \`${suiteCmd}\` for the full-suite regression line.
+
+## Read-only mandate
+Do not write, edit, stash, restore, or push anything. Do not fix a failure yourself — a failure here routes the lane straight to a blocked record, never a silent inline retry. Do not commit.
+
+Return the StructuredOutput: { seal_intact: <bool>, seal_sha256: <the re-computed hash>, passed: <n>, failed: <n>, total: <n>, suite: <the full-suite result line>, notes }.`
+}
+
+function standardReviewPrompt(lane, impl, run) {
+  return `You are an INDEPENDENT fable reviewer for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Verdict: APPROVE or REQUEST_CHANGES. Be adversarial — VERIFY, do not trust the implementer or acceptance_run's self-report.
+
+## Read-only mandate
+Inspect branch \`${lane.branch}\` @ \`${impl.pushed_sha || '(see origin)'}\`, forked from \`${base}\`. Use \`git fetch origin\`, \`git diff ${base}...origin/${lane.branch}\`, \`git show\`, \`git log\`, read files, read-only checks. Do NOT write/edit/commit/stash/restore/push.
+
+## Claimed (verify, don't trust)
+acceptance_run: seal_intact = ${run.seal_intact} · passed = ${run.passed} · failed = ${run.failed} · suite = ${run.suite || '(none)'}
+implement: suite = ${impl.suite || '(none)'} · files = ${(impl.files || []).join(', ') || '(unspecified)'} · seal_verified = ${impl.seal_verified} · notes = ${impl.notes || '(none)'}
+
+## Verify — the durable gates
+1. **Re-hash the sealed test a FOURTH time, independently** — never trust acceptance_run's self-report. \`sha256sum\` it and confirm it matches the seal.
+2. **Audit trail** — confirm a \`chore(#${lane.issue}): seal ... — SEAL\` commit exists in \`git log\` on this branch, and its commit-body sha256 matches your own re-hash.
+3. **The sealed test genuinely exercises real behavior** — could a stub pass it? (same "could a stub pass?" framing every gate in this file applies.)
+4. **No production-code-for-test-convenience shortcuts** — the implementation was not shaped merely to satisfy the letter of the test while missing its intent.
+5. **Scope:** \`git diff --stat ${base}...origin/${lane.branch}\` touches ONLY this lane's planned files — no sibling-lane file, no middleware, no unrelated change, and the sealed test file itself is UNCHANGED from the SEAL commit.
+
+Return the StructuredOutput: verdict, blockers (file:line + why), majors, notes. REQUEST_CHANGES on any hash mismatch, missing/mismatched SEAL commit, tautological test, test-convenience shortcut, or scope breach.`
+}
+
+log(`orchemist-wave [${mode}]: ${lanes.length} lane(s) off ${repo}@${base} — ${mode === 'maintenance' ? 'spec → fable adversary → implement → fable review' : mode === 'codemod' ? 'spec → fable adversary → codemod-implement → fable review' : mode === 'content' ? 'research → draft (opus, worktree) → fact_check (fable gate) → red_team (fable gate)' : mode === 'standard' ? 'spec → behavioral → spec_adversary → acceptance_test → pre-flight RED → test_adversary → SEAL → implement → acceptance_run → review' : 'implement (opus, worktree) → fable review'}, per-lane lockstep. Merge stays an operator step.`)
 
 // Shared: turn a (lane, impl) into a reviewed result, or a blocked record.
 function blockedRecord(lane, impl, reason) {
@@ -622,6 +931,78 @@ if (mode === 'maintenance') {
       if (!rt || rt.verdict !== 'APPROVE') return contentBlocked(lane, cur, 'red_team', rt)
       // both gates APPROVE → merge-ready
       return reviewedRecord(lane, cur, { verdict: 'APPROVE', blockers: [], majors: [], notes: `fact_check + red_team both APPROVE.${fc.notes ? ' fc: ' + fc.notes : ''}${rt.notes ? ' rt: ' + rt.notes : ''}` })
+    },
+  )
+} else if (mode === 'standard') {
+  // Per lane: spec+behavioral+spec_adversary (bounded 1 revise) → acceptance_test+preflight+
+  // test_adversary (bounded 1 revise) → SEAL → implement → acceptance_run → review.
+  results = await pipeline(
+    lanes,
+    // Stage 1 — spec → behavioral → spec_adversary
+    async (lane) => {
+      let spec = await agent(standardSpecPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+      if (!spec) return { lane, spec: null, behavioral: null }
+      let behavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...effortFor('interpretive') })
+      if (!behavioral) return { lane, spec, behavioral: null }
+      for (let round = 0; round < 2; round++) {
+        const v = await agent(standardSpecAdversaryPrompt(lane, spec, behavioral), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+        if (!v || v.verdict === 'APPROVE') break
+        if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — acceptance_test proceeds with the adversary notes folded in.`); break }
+        const revisedSpec = await agent(standardSpecRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+        if (revisedSpec) spec = revisedSpec
+        const revisedBehavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral-rev:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...effortFor('interpretive') })
+        if (revisedBehavioral) behavioral = revisedBehavioral
+      }
+      return { lane, spec, behavioral }
+    },
+    // Stage 2 — acceptance_test → pre-flight RED → test_adversary
+    async ({ lane, spec, behavioral }) => {
+      if (!spec || !behavioral) return { lane, seal: null }
+      let test = await agent(standardAcceptanceTestPrompt(lane, spec, behavioral), { label: `acc-test:${lane.id}`, phase: 'Acceptance Test', agentType: 'orchemist-tester', schema: SEALED_TEST_SCHEMA, ...effortFor('interpretive') })
+      if (!test) return { lane, seal: null }
+      let pf = await agent(standardPreflightPrompt(lane, test), { label: `preflight:${lane.id}`, phase: 'Acceptance Test', agentType: 'general-purpose', isolation: 'worktree', schema: PREFLIGHT_SCHEMA, ...effortFor('implement') })
+      if (!pf) return { lane, seal: null }
+      for (let round = 0; round < 2; round++) {
+        const v = await agent(standardTestAdversaryPrompt(lane, test, pf), { label: `test-adv:${lane.id}`, phase: 'Test Adversary', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+        if (!v || v.verdict === 'APPROVE') break
+        if (round === 1) { log(`lane ${lane.id}: test-adversary still REQUEST_CHANGES after 1 revise — SEAL proceeds with the adversary notes folded in.`); break }
+        test = await agent(standardAcceptanceTestRevisePrompt(lane, test, v), { label: `acc-test-rev:${lane.id}`, phase: 'Acceptance Test', agentType: 'orchemist-tester', schema: SEALED_TEST_SCHEMA, ...effortFor('interpretive') })
+        if (!test) return { lane, seal: null }
+        pf = await agent(standardPreflightPrompt(lane, test), { label: `preflight2:${lane.id}`, phase: 'Acceptance Test', agentType: 'general-purpose', isolation: 'worktree', schema: PREFLIGHT_SCHEMA, ...effortFor('implement') })
+        if (!pf) return { lane, seal: null }
+      }
+      return { lane, test, pf }
+    },
+    // Stage 3 — SEAL
+    async ({ lane, test, pf }) => {
+      if (!pf) return { lane, seal: null }
+      const seal = await agent(standardSealPrompt(lane, test, pf), { label: `seal:${lane.id}`, phase: 'Seal', agentType: 'general-purpose', isolation: 'worktree', schema: SEAL_SCHEMA, ...effortFor('implement') })
+      return { lane, seal }
+    },
+    // Stage 4 — implement
+    async ({ lane, seal }) => {
+      if (!seal || seal.status !== 'sealed') return { lane, impl: null, seal }
+      const impl = await agent(standardImplementPrompt(lane, seal), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...effortFor('implement') })
+      return { lane, impl, seal }
+    },
+    // Stage 5 — acceptance_run
+    async ({ lane, impl, seal }) => {
+      if (!impl || impl.status !== 'pushed') return { lane, impl, seal, run: null }
+      const run = await agent(standardAcceptanceRunPrompt(lane, impl, seal), { label: `acc-run:${lane.id}`, phase: 'Acceptance Run', agentType: 'general-purpose', isolation: 'worktree', schema: ACCEPTANCE_RUN_SCHEMA, ...effortFor('implement') })
+      return { lane, impl, seal, run }
+    },
+    // Stage 6 — review (blocked records are built HERE, the final stage, so lane/issue/branch
+    // survive every failure path — mirrors maintenance:863, codemod:890, content:910, refactor:1007)
+    async ({ lane, impl, seal, run }) => {
+      if (!impl || impl.status !== 'pushed') {
+        const reason = seal && seal.status !== 'sealed'
+          ? `SEAL blocked: ${seal.notes || 'status=' + seal.status}`
+          : (impl ? impl.notes || 'implement did not reach pushed state' : 'spec, acceptance_test, or SEAL returned null')
+        return blockedRecord(lane, impl, reason)
+      }
+      if (!run || !run.seal_intact || run.failed > 0) return blockedRecord(lane, impl, run ? `acceptance_run: seal_intact=${run.seal_intact} failed=${run.failed}` : 'acceptance_run returned null')
+      const v = await agent(standardReviewPrompt(lane, impl, run), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+      return reviewedRecord(lane, impl, v)
     },
   )
 } else {
