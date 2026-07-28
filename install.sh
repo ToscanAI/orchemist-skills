@@ -70,6 +70,22 @@ TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 # ── Drift accumulator (used in --check mode only) ─────────────────────────────
 MISMATCH_COUNT=0
 
+# ── normalize_lf SRC ─────────────────────────────────────────────────────────
+# Emit SRC on stdout with every CR (0x0D) byte removed. A Windows clone running
+# Git for Windows' default core.autocrlf=true yields a CRLF working tree; copied
+# verbatim, those CRs are control characters that make Claude Code's Workflow
+# permission layer refuse to launch workflows/orchemist-wave.js (issue #50).
+# .gitattributes fixes FRESH clones only, so the installer normalises defensively
+# and does not assume a clean checkout.
+#
+# Every file this installer copies is text (skills/*.md, agents/*.md,
+# pipelines/*.yaml, profiles/*.yaml, workflows/*.js) — the pack ships no binary
+# artifact — so stripping CR unconditionally is safe. On an LF checkout this is a
+# byte-level no-op. If a binary artifact is ever added, it must bypass this.
+normalize_lf() {
+  tr -d '\r' < "$1"
+}
+
 # ── install_file SRC DST ──────────────────────────────────────────────────────
 # Copies SRC -> DST. If DST exists and is byte-identical to SRC, skip silently.
 # If DST exists and differs, back up DST to DST.bak.<timestamp> then copy.
@@ -88,7 +104,7 @@ install_file() {
     if [ ! -f "$dst" ]; then
       echo "  MISSING: $dst"
       MISMATCH_COUNT=$((MISMATCH_COUNT + 1))
-    elif cmp -s "$src" "$dst"; then
+    elif cmp -s <(normalize_lf "$src") "$dst"; then
       echo "  OK: $dst"
     else
       echo "  MISMATCH: $dst"
@@ -99,7 +115,7 @@ install_file() {
 
   # ── install mode: copy SRC -> DST, backing up a differing DST first. ─────────
   if [ -f "$dst" ]; then
-    if cmp -s "$src" "$dst"; then
+    if cmp -s <(normalize_lf "$src") "$dst"; then
       echo "  unchanged: $dst"
       return 0
     fi
@@ -107,7 +123,7 @@ install_file() {
     cp "$dst" "$backup"
     echo "  backed up: $dst -> $backup"
   fi
-  cp "$src" "$dst"
+  normalize_lf "$src" > "$dst"
   echo "  installed: $dst"
 }
 

@@ -1,0 +1,27 @@
+# Orchemist Skills Pack — line-ending policy.
+#
+# Every artifact this pack ships is text, and several are consumed by tools that
+# reject CR (0x0D): Claude Code's Workflow permission layer refuses to launch a
+# script whose bytes "contain control characters that would be hidden in the
+# approval dialog", and a CRLF shebang breaks `#!/usr/bin/env bash`. Normalise to
+# LF in the working tree on EVERY platform — including Windows clones running
+# Git for Windows' default `core.autocrlf=true`.
+
+# Store LF in the index and check out LF everywhere. `text=auto` still lets Git
+# content-detect and leave any future binary artifact untouched.
+* text=auto eol=lf
+
+# Explicit entries for the shipped artifact types (belt and braces, and they
+# document the intent for anyone adding a new artifact).
+*.js    text eol=lf
+*.md    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.json  text eol=lf
+*.py    text eol=lf
+*.txt   text eol=lf
+*.toml  text eol=lf
+
+# Shell scripts must be LF independently of the rule above: with a CRLF shebang
+# the kernel looks for an interpreter literally named "bash\r", which fails.
+*.sh    text eol=lf
