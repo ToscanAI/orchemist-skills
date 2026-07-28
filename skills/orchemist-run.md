@@ -388,7 +388,7 @@ Field report (a production EPIC-20 run): a seal-break edit was applied to the wo
 
 Discipline:
 1. **Commit any uncommitted working-tree change BEFORE dispatching a subagent with git/Bash.** A committed change survives the subagent's git ops. Most acute in the seal-break flow (edit → narrow review) and the implement/fix → review loop. (If you must keep it uncommitted, `git stash` it yourself and restore after — do not rely on the subagent to leave the tree untouched.)
-2. **After such a subagent returns, COMMAND-VERIFY** the working tree / HEAD still carries your intended bytes (`git status`; `git show HEAD:<file> | sha256sum` — or `shasum -a 256`, or pipe to `Get-FileHash -Algorithm SHA256` on a PowerShell-only host — vs the expected/re-sealed sha) before trusting any "green" claim it made.
+2. **After such a subagent returns, COMMAND-VERIFY** the working tree / HEAD still carries your intended bytes (`git status`; `git show HEAD:<file> | sha256sum` — or `shasum -a 256`; on a PowerShell-only host the equivalent is `Get-FileHash -Algorithm SHA256`, but it takes a **path or a stream, never piped stdin content** — a piped string binds to `-Path`, so `git show HEAD:<file> | Get-FileHash` tries to open a file *named* after those bytes and fails; write the bytes to a temp file first (`git show HEAD:<file> > tmp.bin; Get-FileHash -Algorithm SHA256 tmp.bin`) or pass an explicit `-InputStream` — vs the expected/re-sealed sha) before trusting any "green" claim it made.
 3. **Prefer a read-only reviewer subagent type** (Read/Grep/Glob only — e.g. the `orchemist-adversary`) for pure review; it cannot mutate the tree. Reach for a full-tools `general-purpose` reviewer only when it must run commands — and commit first.
 
 ## Output contract
