@@ -4,6 +4,25 @@ All notable changes to the orchemist-skills pack are recorded here. The pipeline
 
 This changelog uses [Semantic Versioning](https://semver.org/) for the pipeline YAML version field.
 
+## [wave-recon-phase] — 2026-08-05
+
+### Added — Phase 0 recon for the wave's planning modes (closes [#58](https://github.com/ToscanAI/orchemist-skills/issues/58))
+
+The single-issue pipelines open with `existing_symbols_inventory`. The wave did not — it folded grounding into a single clause of the spec prompt (*"Recon the area-of-change in the repo, then plan"*). Grounding was requested, but as an instruction rather than a phase, which cost three things: no separately inspectable output, no fresh-context separation between surveying and planning, and — the load-bearing one — the **spec-adversary could only check the plan against its own reading of the code, never against the evidence the plan was built on**.
+
+`maintenance`, `codemod` and `standard` now each dispatch a read-only **recon** per lane before `spec`. (`refactor` goes straight to implement; `content` has its own `research` front-end.)
+
+- **`reconPrompt` + `RECON_SCHEMA`** — returns `{ findings, files, seal_surface, open_questions }`. The prompt asks explicitly for what already **exists** that the lane might otherwise rebuild, and tells the agent that *"this does not exist"* is a valid and load-bearing answer rather than something to paper over. It also instructs reading each candidate file's **header** to determine seal status rather than inferring from its folder, since a folder commonly mixes sealed and unsealed files.
+- **Both the spec AND the spec-adversary receive it.** The adversary gains a first decisive check — *PLAN vs EVIDENCE: does the plan contradict the recon — asserting something exists that the recon found absent, rebuilding something it found present, or ignoring an open question it raised?* The revise prompts receive it too, so a revision cannot "solve" a finding by drifting off verified evidence.
+- **The superseded inline clause is removed** from both spec prompts.
+- **`meta.phases`, the `whenToUse` blurb and the run-start banner** all now name the phase, per the #55 invariant that the wave must never misdescribe its own behaviour.
+
+**Why field data motivated this.** On a consumer repo a dedicated recon repeatedly *changed* the design rather than confirming it: establishing that no paragraph-style information is read anywhere in an importer (killing the obvious approach before a line was written); that a scoping column already existed (collapsing a planned schema migration into signature plumbing); and that an issue's item had already been delivered by an earlier change (a lane would otherwise have built a duplicate guard, which is a real defect, not a no-op).
+
+**Deliberately not a file artifact.** The recon returns structured output. The wave has no artifact convention — only worktree-isolated implement agents write anything — and the harness already persists every agent's return value to the run's `journal.jsonl`. Writing a file would dirty the consumer's working tree for no gain in durability. This is a conscious deviation from #58's own suggested acceptance criterion, recorded here rather than silently taken.
+
+- New `tests/test_wave_recon_phase.py` (18 tests): the phase exists in exactly the three planning modes; uses `general-purpose` (not a read-only subagent type, per [#9](https://github.com/ToscanAI/orchemist-skills/issues/9)); declares no worktree; **precedes** the spec it feeds; both the spec family and both adversaries render it; a null recon degrades loudly rather than rendering empty; and the self-description is accurate. All 18 were mutation-verified — they fail against the pre-#58 wave and pass after — including explicit non-vacuity guards on the two that would otherwise pass trivially when zero recon dispatches exist.
+
 ## [wave-tiering-fix] — 2026-08-05
 
 ### Fixed — a non-default `tiering_profile` made `orchemist-wave` unrunnable (closes [#59](https://github.com/ToscanAI/orchemist-skills/issues/59); follow-up to [#41](https://github.com/ToscanAI/orchemist-skills/issues/41))
