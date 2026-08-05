@@ -3,8 +3,9 @@ export const meta = {
   description:
     'Parallel "wave" orchestrator for Orchemist: fan N independent, file-disjoint lanes through a per-lane pipeline — mode:"refactor" runs implement → independent fable review; mode:"maintenance" runs the maintenance pipeline per lane (spec → fable spec-adversary → implement+focused-test → independent fable review); mode:"codemod" runs a behavior-preserving lint/codemod cleanup WITH the same spec + fable spec-adversary planning gate (spec → fable spec-adversary → codemod-implement → independent fable review, no new test); mode:"content" runs the content pipeline per lane (research → draft(opus, real committed diff) → fact_check(fable gate) → red_team(fable gate), each gate with one bounded re-draft) for in-app content authored as a code diff; mode:"standard" runs the full sealed-acceptance flow per lane for NEW, file-disjoint, sealable behavior (spec → behavioral → spec_adversary(fable) → acceptance_test(orchemist-tester) → pre-flight RED → test_adversary(fable) → SEAL(sha256-hash + commit) → implement → acceptance_run (re-hash) → review(fable)). Per-lane lockstep, each lane sealed in its own git worktree. Produces reviewed, pushed branches + per-lane merge-readiness verdicts. Does NOT merge — the merge-coordination (branch-protection toggle + squash-merge + composition full-suite) stays a deliberate, outward-facing operator step.',
   whenToUse:
-    'When several file-DISJOINT lanes are ready at once. mode:"refactor" (default) — behavior-preserving changes (a god-module decomposition, a mechanical codemod); each lane needs an immutable contract (a surface/contract test + the full suite). mode:"maintenance" — a batch of independent bug/infra/CI/data fixes; each lane runs the maintenance pipeline (spec → fable adversary → implement + a FOCUSED test → fable review), the right-sized flow that adds behavior + tests (NOT behavior-preserving). mode:"codemod" — the middle ground: a behavior-preserving lint/codemod cleanup (e.g. driving a per-package bulk-suppression baseline to zero) that still wants the spec + fable-adversary planning gate but adds NO behavior and NO new test. mode:"content" — a batch of independent in-app CONTENT modules (a gated route-page + a data-file entry + a curated link/video allowlist), each authored as a real committed diff and gated by a source-grounded fact_check + an IP/brand red_team (both fable, blocking); pre-place each lane\'s operator-refined source_material.md and pass its absolute path as lane.sourceFile. mode:"standard" — a batch of independent NEW, file-disjoint, sealable-behavior modules (e.g. a Black-Scholes engine + indicator modules) that need the FULL sealed-acceptance bar (spec → behavioral → spec_adversary(fable) → acceptance_test(orchemist-tester) → pre-flight RED → test_adversary(fable) → SEAL → implement → acceptance_run → review(fable)) — stronger than mode:"maintenance"\'s single spec-adversary gate + focused test. Rule of thumb: serialize lanes WITHIN one module (same files), parallelize ACROSS modules (disjoint dirs compose cleanly).',
+    'When several file-DISJOINT lanes are ready at once. mode:"refactor" (default) — behavior-preserving changes (a god-module decomposition, a mechanical codemod); each lane needs an immutable contract (a surface/contract test + the full suite). mode:"maintenance" — a batch of independent bug/infra/CI/data fixes; each lane runs the maintenance pipeline (recon → spec → fable adversary → implement + a FOCUSED test → fable review), the right-sized flow that adds behavior + tests (NOT behavior-preserving). mode:"codemod" — the middle ground: a behavior-preserving lint/codemod cleanup (e.g. driving a per-package bulk-suppression baseline to zero) that still wants the recon + spec + fable-adversary planning gate but adds NO behavior and NO new test. mode:"content" — a batch of independent in-app CONTENT modules (a gated route-page + a data-file entry + a curated link/video allowlist), each authored as a real committed diff and gated by a source-grounded fact_check + an IP/brand red_team (both fable, blocking); pre-place each lane\'s operator-refined source_material.md and pass its absolute path as lane.sourceFile. mode:"standard" — a batch of independent NEW, file-disjoint, sealable-behavior modules (e.g. a Black-Scholes engine + indicator modules) that need the FULL sealed-acceptance bar (recon → spec → behavioral → spec_adversary(fable) → acceptance_test(orchemist-tester) → pre-flight RED → test_adversary(fable) → SEAL → implement → acceptance_run → review(fable)) — stronger than mode:"maintenance"\'s single spec-adversary gate + focused test. Rule of thumb: serialize lanes WITHIN one module (same files), parallelize ACROSS modules (disjoint dirs compose cleanly).',
   phases: [
+    { title: 'Recon', detail: 'maintenance + codemod + standard modes — one general-purpose per lane inventories what EXISTS before any approach is chosen; its findings feed BOTH the spec and the spec-adversary (#58)', model: 'sonnet' },
     { title: 'Spec', detail: 'maintenance + codemod + standard modes — spec + fable spec-adversary per lane (the pre-implement quality gate)', model: 'fable' },
     { title: 'Research', detail: 'content mode — one general-purpose (sonnet) per lane: web-verify links/videos + confirm the correctness anchors', model: 'sonnet' },
     { title: 'Behavioral', detail: 'standard mode — one general-purpose (sonnet) per lane derives numbered "When X, the system Y" contracts from spec.observable_outcomes', model: 'sonnet' },
@@ -348,11 +349,73 @@ suite = ${impl.suite || '(none)'} · files = ${(impl.files || []).join(', ') || 
 Return the StructuredOutput: verdict, blockers (numbered, file:line + why), majors, surface_diff_clean (bool), notes. REQUEST_CHANGES on any blocker or any real surface regression.`
 }
 
+// ── Phase 0 recon (#58) — maintenance / codemod / standard ──
+// The single-issue pipelines open with `existing_symbols_inventory`; the wave did not, folding it
+// into one clause of the spec prompt ("Recon the area-of-change, then plan"). That made grounding an
+// instruction rather than a phase, with three costs: no separately inspectable output, no fresh-context
+// separation between surveying and planning, and — the load-bearing one — the spec_adversary could
+// only check the plan against its OWN reading, never against the evidence the plan was built on.
+//
+// Consumer field data (fiskaltrust/legal): a dedicated recon repeatedly CHANGED the design rather
+// than confirming it — establishing that no paragraph-style information is read anywhere (killing the
+// obvious approach before a line was written), that a scoping column already existed (collapsing a
+// migration into signature plumbing), and that an issue's item was already delivered (a lane would
+// otherwise have built a duplicate guard).
+//
+// The recon returns StructuredOutput rather than writing a file: the wave has no artifact convention,
+// only worktree-isolated implement agents write, and the harness already persists every agent's return
+// value to the run's journal.jsonl — durable and inspectable without dirtying the consumer's tree.
+const RECON_SCHEMA = {
+  type: 'object',
+  additionalProperties: true,
+  required: ['findings'],
+  properties: {
+    findings: { type: 'string', description: 'What EXISTS today in the area of change, file:line throughout. Real signatures, quoted. The inventory the plan must be built on.' },
+    files: { type: 'array', items: { type: 'string' }, description: 'The files the change will actually touch, as DISCOVERED — may refine the lane brief, which is a hypothesis.' },
+    seal_surface: { type: 'string', description: 'Sealed / byte-locked / SHA-pinned / frozen files near the change, named explicitly. Empty string if genuinely none.' },
+    open_questions: { type: 'string', description: 'Genuine uncertainties for the spec to resolve. "Nothing exists yet" is a valid and important finding — say so rather than guessing.' },
+  },
+}
+
+function reconPrompt(lane) {
+  return `You are the RECON agent (Phase 0) for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Inventory what EXISTS. READ-ONLY — no edits, no branch, no commits, and you are NOT in a worktree.
+
+## The change this lane will make
+${lane.implement}
+
+## Files the lane brief NAMES (a hypothesis to verify, not a given)
+${lane.files || '(not specified — discover them)'}
+
+## Your job
+Survey the real code and report what is THERE, so the spec plans against evidence instead of assumption. Do NOT propose a design, a fix, or an approach — that is the spec's job, and a recon that pre-commits to one defeats the separation.
+
+1. **The area of change** — the functions/types/call sites the lane will touch. Quote REAL signatures with file:line. Where the lane brief's file list is wrong or incomplete, say so.
+2. **What already exists that the lane might otherwise rebuild.** The highest-value finding in this whole phase: a field, guard, helper or column that already does the job, or an item the issue asks for that a previous change ALREADY delivered. Re-implementing an existing guard is a real defect, not a harmless duplicate.
+3. **The seal surface** — sealed / byte-locked / SHA-pinned / frozen files near the change. Read each candidate's HEADER rather than inferring from its folder; in most repos seal status is declared per file, and a folder often mixes sealed and unsealed. Name every one the change could perturb.
+4. **What the change could break** — the tests and callers in its blast radius, named individually, not as a category.
+5. **Open questions** — genuine uncertainties the spec must decide. **"This does not exist"** is a valid and load-bearing answer; report it plainly rather than guessing, because it usually changes the design.
+
+Cite file:line throughout. Prefer "I checked X and it is not there" over silence — an absence you verified is evidence; an absence you assumed is not.
+
+Return the StructuredOutput: { findings, files, seal_surface, open_questions }.`
+}
+
+// Rendered into the spec + adversary prompts. Kept compact: the adversary needs the evidence to check
+// the plan AGAINST, not a second copy of the codebase.
+function reconBlock(recon) {
+  if (!recon) return '(Phase 0 recon unavailable — this lane is planning WITHOUT an inventory; treat every claim about existing code as unverified and check it yourself.)'
+  return `${recon.findings}
+
+FILES DISCOVERED: ${(recon.files || []).join(', ') || '(none reported)'}
+SEAL SURFACE: ${recon.seal_surface || '(none reported)'}
+OPEN QUESTIONS: ${recon.open_questions || '(none reported)'}`
+}
+
 // ── maintenance/codemod-mode prompts (shared spec trio + per-mode implement/review) ──
 // laneKind is reached ONLY by codemod + maintenance (refactor never calls the trio);
 // with mode==='maintenance' it is the literal 'bug/infra/data fix' the trio always used.
 const laneKind = mode === 'codemod' ? 'behavior-preserving codemod/lint cleanup' : 'bug/infra/data fix'
-function specPrompt(lane) {
+function specPrompt(lane, recon) {
   return `You are the SPEC agent for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Produce a FOCUSED implementation plan for this ${laneKind} (WHAT + HOW). READ-ONLY — no code edits.
 
 ## The change
@@ -361,16 +424,24 @@ ${lane.implement}
 ## Files this lane may touch
 ${lane.files || '(infer from the change; keep it minimal + file-disjoint from sibling lanes)'}
 
-Recon the area-of-change in the repo, then plan: the EXACT files to edit, the approach, the SEAL SURFACE to AVOID (verify-scripts/SHA-pins near the change — or, if a seal-break is genuinely required, name the exact pin to re-baseline and why it's anticipated), and the VALIDATION plan: ${mode === 'codemod' ? 'lint+typecheck+suite stay GREEN AND the target bulk-suppression file shrinks to ONLY the pre-declared protected residual (name the residual entries you keep + why each is load-bearing) — no new test.' : 'a FOCUSED unit/e2e test if locally testable, else the concrete PROD-VALIDATION steps.'} Do NOT propose a heavyweight sealed verify-script.
+## Phase 0 recon — what a fresh agent found ACTUALLY EXISTS (#58)
+${reconBlock(recon)}
+
+Build the plan ON that inventory: it is evidence, gathered before any approach was chosen. Where it says something already exists, CONSUME it — do not rebuild it. Where it flags an open question, RESOLVE it rather than leaving it implicit. Where it contradicts the lane brief's file list, prefer the recon and say so; the brief is a hypothesis, the recon is what is there. If you must contradict the recon, verify against the real code first and state why.
+
+Plan: the EXACT files to edit, the approach, the SEAL SURFACE to AVOID (verify-scripts/SHA-pins near the change — or, if a seal-break is genuinely required, name the exact pin to re-baseline and why it's anticipated), and the VALIDATION plan: ${mode === 'codemod' ? 'lint+typecheck+suite stay GREEN AND the target bulk-suppression file shrinks to ONLY the pre-declared protected residual (name the residual entries you keep + why each is load-bearing) — no new test.' : 'a FOCUSED unit/e2e test if locally testable, else the concrete PROD-VALIDATION steps.'} Do NOT propose a heavyweight sealed verify-script.
 
 Return the StructuredOutput: { plan: <the full plan>, files: [...], validation: <focused-test (which) | prod-validation steps> }.`
 }
 
-function specRevisePrompt(lane, prevPlan, verdict) {
+function specRevisePrompt(lane, prevPlan, verdict, recon) {
   return `You are the SPEC agent REVISING the plan for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}). An independent fable adversary found problems. Apply the VERBATIM fixes; keep everything else stable. READ-ONLY.
 
 ## The change
 ${lane.implement}
+
+## Phase 0 recon — the same inventory the original plan was built on (#58)
+${reconBlock(recon)}
 
 ## Previous plan
 ${prevPlan}
@@ -378,19 +449,25 @@ ${prevPlan}
 ## Adversary findings (address every blocker)
 ${(verdict.blockers || []).map((b, i) => `${i + 1}. ${b}`).join('\n') || verdict.notes || '(see notes)'}
 
+Fix what was found without drifting off the recon: a revision that "solves" a finding by contradicting verified evidence has traded one defect for a worse one.
+
 Return the StructuredOutput: { plan, files, validation } — the corrected plan.`
 }
 
-function specAdversaryPrompt(lane, spec) {
+function specAdversaryPrompt(lane, spec, recon) {
   return `You are the SPEC ADVERSARY (Fable 5) for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Independently pressure-test the fix APPROACH for correctness, safety, timing, seal-impact, and missed edge cases — the key quality gate for ${mode === 'codemod' ? 'behavior-preserving cleanup work' : 'prod-affecting maintenance work'}. READ-ONLY; verify against the REAL code.
 
 ## The change
 ${lane.implement}
 
+## Phase 0 recon — the evidence the plan was built on (#58)
+${reconBlock(recon)}
+
 ## Proposed plan (vet it)
 ${spec.plan}
 
 ## Decisive checks
+- PLAN vs EVIDENCE: does the plan CONTRADICT the recon — asserting something exists that the recon found absent, rebuilding something the recon found already present, or ignoring an open question it raised? That is the cheapest real defect to catch here, and you are the only phase holding both documents. Treat the recon as evidence, not gospel: if you believe IT is wrong, verify against the real code and say so explicitly.
 - ${mode === 'codemod' ? 'Does the plan PRESERVE behavior AND drive the target bulk-suppression file to the declared residual? Is each fix auto-fixable-style (`eslint --fix`) OR an inline `// eslint-disable-next-line <rule> -- <reason>` with a real load-bearing rationale (not a blanket re-suppress)?' : 'Does the approach actually fix the issue, end-to-end? Any path it misses?'}
 - SEAL IMPACT: does it touch a byte-locked / SHA-pinned / HARD-NO surface unexpectedly? Is any seal-break genuinely anticipated + named (vs a surprise)?
 - NIGHTLY SEAL FOOTPRINT: if the lane adds a shared-type field, a cross-package importer, or a new test / \`__tests__\` file, does the plan enumerate the NIGHTLY/AGGREGATE-only pins that footprint touches — a count·keyof / field-count / set-equality pin AND any recursive importer/dir allowlist (typically globs \`__tests__/\`) — BEYOND the lane's OWN verify script, and NAME each such pin to re-baseline? A lane green on its own suite can still land RED on the post-merge full-suite; catch it pre-merge.
@@ -610,7 +687,7 @@ Return the StructuredOutput: status ('pushed' only if green + pushed; else 'bloc
 }
 
 // ── standard-mode prompts (sealed-acceptance flow per lane, mirrors coding-pipeline-standard.yaml) ──
-function standardSpecPrompt(lane) {
+function standardSpecPrompt(lane, recon) {
   return `You are the SPEC agent for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Produce a FOCUSED implementation plan for this NEW, sealable-behavior module (Section B: Implementation Guidance — problem statement, files to touch, implementation steps, risk assessment). READ-ONLY — no code edits, no worktree.
 
 ## The change
@@ -619,16 +696,26 @@ ${lane.implement}
 ## Files this lane may touch
 ${lane.files || '(infer from the change; keep it minimal + file-disjoint from sibling lanes)'}
 
-Recon the area-of-change in the repo, then plan: the EXACT files to create/edit, the approach, and — for EACH change — the OBSERVABLE OUTCOME a caller/test can see (return values, exact output, error messages; this feeds the next BEHAVIORAL phase directly). Do NOT propose a heavyweight sealed verify-script.
+## Phase 0 recon — what a fresh agent found ACTUALLY EXISTS (#58)
+${reconBlock(recon)}
+
+Build the plan ON that inventory: it is evidence, gathered before any approach was chosen. Where it says something already exists, CONSUME it — do not rebuild it. Where it flags an open question, RESOLVE it. Where it contradicts the lane brief's file list, prefer the recon and say so. If you must contradict the recon, verify against the real code first and state why.
+
+Plan: the EXACT files to create/edit, the approach, and — for EACH change — the OBSERVABLE OUTCOME a caller/test can see (return values, exact output, error messages; this feeds the next BEHAVIORAL phase directly). Do NOT propose a heavyweight sealed verify-script.
 
 Return the StructuredOutput: { plan: <the full plan>, files: [...], validation: <how this will be validated>, observable_outcomes: <for each change, what a caller/test can OBSERVE> }.`
 }
 
-function standardSpecRevisePrompt(lane, prevPlan, verdict) {
+function standardSpecRevisePrompt(lane, prevPlan, verdict, recon) {
   return `You are the SPEC agent REVISING the plan for standard-wave lane "${lane.id}" (issue #${lane.issue}). An independent fable adversary found problems with the plan and/or the behavioral contracts derived from it. Apply the VERBATIM fixes; keep everything else stable. READ-ONLY.
 
 ## The change
 ${lane.implement}
+
+## Phase 0 recon — the same inventory the original plan was built on (#58)
+${reconBlock(recon)}
+
+Fix what was found without drifting off the recon: a revision that "solves" a finding by contradicting verified evidence has traded one defect for a worse one.
 
 ## Previous plan
 ${prevPlan}
@@ -656,11 +743,14 @@ ${spec.plan}
 Return the StructuredOutput: { contracts: <numbered "When X, the system Y" contracts>, contract_count: <the count> }.`
 }
 
-function standardSpecAdversaryPrompt(lane, spec, behavioral) {
+function standardSpecAdversaryPrompt(lane, spec, behavioral, recon) {
   return `You are the SPEC ADVERSARY (Fable 5) for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Independently pressure-test BOTH the plan and the behavioral contracts for this NEW, sealable-behavior module. READ-ONLY; verify against the REAL code.
 
 ## The change
 ${lane.implement}
+
+## Phase 0 recon — the evidence the plan was built on (#58)
+${reconBlock(recon)}
 
 ## Proposed plan
 ${spec.plan}
@@ -669,6 +759,7 @@ ${spec.plan}
 ${behavioral.contracts}
 
 ## Decisive checks
+0. PLAN vs EVIDENCE — does the plan CONTRADICT the recon: asserting something exists that the recon found absent, rebuilding something it found already present, or ignoring an open question it raised? You are the only phase holding both documents. Treat the recon as evidence, not gospel: if you believe IT is wrong, verify against the real code and say so explicitly.
 1. SPECIFICITY — is every contract concrete (exact values/strings/errors), not vague?
 2. TRIVIAL-SATISFACTION — could a stub/no-op implementation pass any contract?
 3. EDGE-CASE COVERAGE — happy path, error paths, edge cases, interactions all present?
@@ -829,7 +920,7 @@ implement: suite = ${impl.suite || '(none)'} · files = ${(impl.files || []).joi
 Return the StructuredOutput: verdict, blockers (file:line + why), majors, notes. REQUEST_CHANGES on any hash mismatch, missing/mismatched SEAL commit, tautological test, test-convenience shortcut, or scope breach.`
 }
 
-log(`orchemist-wave [${mode}]: ${lanes.length} lane(s) off ${repo}@${base} — ${mode === 'maintenance' ? 'spec → fable adversary → implement → fable review' : mode === 'codemod' ? 'spec → fable adversary → codemod-implement → fable review' : mode === 'content' ? 'research → draft (opus, worktree) → fact_check (fable gate) → red_team (fable gate)' : mode === 'standard' ? 'spec → behavioral → spec_adversary → acceptance_test → pre-flight RED → test_adversary → SEAL → implement → acceptance_run → review' : 'implement (opus, worktree) → fable review'}, per-lane lockstep. Merge stays an operator step.`)
+log(`orchemist-wave [${mode}]: ${lanes.length} lane(s) off ${repo}@${base} — ${mode === 'maintenance' ? 'recon → spec → fable adversary → implement → fable review' : mode === 'codemod' ? 'recon → spec → fable adversary → codemod-implement → fable review' : mode === 'content' ? 'research → draft (opus, worktree) → fact_check (fable gate) → red_team (fable gate)' : mode === 'standard' ? 'recon → spec → behavioral → spec_adversary → acceptance_test → pre-flight RED → test_adversary → SEAL → implement → acceptance_run → review' : 'implement (opus, worktree) → fable review'}, per-lane lockstep. Merge stays an operator step.`)
 
 // Shared: turn a (lane, impl) into a reviewed result, or a blocked record.
 function blockedRecord(lane, impl, reason) {
@@ -868,13 +959,14 @@ if (mode === 'maintenance') {
   results = await pipeline(
     lanes,
     async (lane) => {
-      let spec = await agent(specPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
+      const recon = await agent(reconPrompt(lane), { label: `recon:${lane.id}`, phase: 'Recon', agentType: 'general-purpose', schema: RECON_SCHEMA, ...tierFor('interpretive') })
+      let spec = await agent(specPrompt(lane, recon), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
       if (!spec) return { lane, spec: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
+        const v = await agent(specAdversaryPrompt(lane, spec, recon), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds on the spec plan alone — the unresolved findings are NOT forwarded.`); break }
-        const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
+        const revised = await agent(specRevisePrompt(lane, spec.plan, v, recon), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
         if (revised) spec = revised
       }
       return { lane, spec }
@@ -895,13 +987,14 @@ if (mode === 'maintenance') {
   results = await pipeline(
     lanes,
     async (lane) => {
-      let spec = await agent(specPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
+      const recon = await agent(reconPrompt(lane), { label: `recon:${lane.id}`, phase: 'Recon', agentType: 'general-purpose', schema: RECON_SCHEMA, ...tierFor('interpretive') })
+      let spec = await agent(specPrompt(lane, recon), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
       if (!spec) return { lane, spec: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
+        const v = await agent(specAdversaryPrompt(lane, spec, recon), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds on the spec plan alone — the unresolved findings are NOT forwarded.`); break }
-        const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
+        const revised = await agent(specRevisePrompt(lane, spec.plan, v, recon), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
         if (revised) spec = revised
       }
       return { lane, spec }
@@ -965,15 +1058,16 @@ if (mode === 'maintenance') {
     lanes,
     // Stage 1 — spec → behavioral → spec_adversary
     async (lane) => {
-      let spec = await agent(standardSpecPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
+      const recon = await agent(reconPrompt(lane), { label: `recon:${lane.id}`, phase: 'Recon', agentType: 'general-purpose', schema: RECON_SCHEMA, ...tierFor('interpretive') })
+      let spec = await agent(standardSpecPrompt(lane, recon), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
       if (!spec) return { lane, spec: null, behavioral: null }
       let behavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...tierFor('interpretive') })
       if (!behavioral) return { lane, spec, behavioral: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(standardSpecAdversaryPrompt(lane, spec, behavioral), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
+        const v = await agent(standardSpecAdversaryPrompt(lane, spec, behavioral, recon), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — acceptance_test proceeds on the behavioral contracts alone — the unresolved findings are NOT forwarded.`); break }
-        const revisedSpec = await agent(standardSpecRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
+        const revisedSpec = await agent(standardSpecRevisePrompt(lane, spec.plan, v, recon), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
         if (revisedSpec) spec = revisedSpec
         const revisedBehavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral-rev:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...tierFor('interpretive') })
         if (revisedBehavioral) behavioral = revisedBehavioral

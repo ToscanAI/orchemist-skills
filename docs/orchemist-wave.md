@@ -28,10 +28,34 @@ regardless of mode; implement and draft dispatches run on **Opus**.
 | mode | per-lane sequence | the bar |
 |---|---|---|
 | `refactor` (default) | `implement` → `review` | ZERO functional change. The reviewer's durable gate is an explicit **public-surface diff** — a dropped re-export passes both the contract test and the full suite, so only the diff catches it. Pass `facadeTest` to name the contract/surface test. |
-| `maintenance` | `spec` → `spec_adversary` → `implement` (+ a FOCUSED test) → `review` | Lanes **ADD** behavior and tests. Not behavior-preserving, so there is no surface-diff invariant. The spec-adversary is the key quality gate for prod-affecting work. |
-| `codemod` | `spec` → `spec_adversary` → `codemod-implement` → `review` | Behavior 100% unchanged, NO new behavior, NO new test. The reviewer's durable gate is that the target bulk-suppression file **shrank** via fix-then-`eslint --prune-suppressions` — never a bare deletion, never merely lint exit 0. |
+| `maintenance` | `recon` → `spec` → `spec_adversary` → `implement` (+ a FOCUSED test) → `review` | Lanes **ADD** behavior and tests. Not behavior-preserving, so there is no surface-diff invariant. The spec-adversary is the key quality gate for prod-affecting work. |
+| `codemod` | `recon` → `spec` → `spec_adversary` → `codemod-implement` → `review` | Behavior 100% unchanged, NO new behavior, NO new test. The reviewer's durable gate is that the target bulk-suppression file **shrank** via fix-then-`eslint --prune-suppressions` — never a bare deletion, never merely lint exit 0. |
 | `content` | `research` → `draft` → `fact_check` gate → `red_team` gate | In-app content authored as a **real committed diff**. Both gates BLOCK. Every factual claim must trace to the pre-placed source material or a web-verified source. |
-| `standard` | `spec` → `behavioral` → `spec_adversary` → `acceptance_test` → pre-flight RED → `test_adversary` → **SEAL** → `implement` → `acceptance_run` → `review` | NEW, sealable behavior gated by an **immutable, sha256-hashed** acceptance test. The implementer must make the sealed test pass and must not modify it; an apparent test defect is a BLOCKED report, never a silent edit. |
+| `standard` | `recon` → `spec` → `behavioral` → `spec_adversary` → `acceptance_test` → pre-flight RED → `test_adversary` → **SEAL** → `implement` → `acceptance_run` → `review` | NEW, sealable behavior gated by an **immutable, sha256-hashed** acceptance test. The implementer must make the sealed test pass and must not modify it; an apparent test defect is a BLOCKED report, never a silent edit. |
+
+### Phase 0 recon (`maintenance`, `codemod`, `standard`)
+
+Every planning mode opens with a read-only **recon** dispatch per lane, mirroring the single-issue
+pipelines' `existing_symbols_inventory`. It inventories what the area of change *already contains* —
+real signatures with `file:line`, the seal surface, and the open questions the spec must resolve —
+before any approach has been chosen.
+
+Its findings are rendered into **both** the spec **and** the spec-adversary. That second consumer is
+the point: the adversary is then the one phase holding the plan *and* the evidence it was built on,
+so it can catch "the plan asserts X, but the recon found Y" — a class of defect it cannot see when
+it only has the plan.
+
+The single most valuable thing a recon reports is that something **already exists**: a guard, a
+column, or an issue item a previous change already delivered. Rebuilding one of those is a real
+defect, not a harmless duplicate.
+
+`refactor` has no recon (it goes straight to implement) and `content` has its own `research`
+front-end instead.
+
+The recon returns structured output rather than writing a file. The wave has no artifact convention
+— only worktree-isolated implement agents write anything — and the harness already persists every
+agent's return value to the run's `journal.jsonl`, so the findings are durable and inspectable
+without dirtying the consumer's working tree.
 
 ### Mode selection is an exact string match
 
