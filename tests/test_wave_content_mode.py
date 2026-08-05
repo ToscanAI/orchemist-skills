@@ -1,7 +1,7 @@
 """orchemist-wave content-mode structural test (pack — content wave).
 
 Pure text-assertions over workflows/orchemist-wave.js (same approach as
-tests/test_tiering_profiles.py::test_wave_effort_map_in_sync, which reads the wave JS as
+tests/test_tiering_profiles.py::test_wave_tier_map_in_sync, which reads the wave JS as
 text). No node runtime required for the assertions; an OPTIONAL `node --check` syntax gate
 runs when node is on PATH, else it skips.
 

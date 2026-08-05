@@ -128,20 +128,45 @@ const invariant =
     ? 'NEW, sealable behavior gated by an immutable, adversarially-reviewed acceptance test — you MUST make the sealed test pass; you MUST NOT modify, delete, or work around the sealed test file under any path (an apparent test defect is a BLOCKED report, never a silent edit). This is NOT a behavior-preserving refactor — there is no surface-diff/facade requirement. Edit ONLY the planned files. middleware HARD-NO.'
     : 'Behavior 100% unchanged; the public surface and every caller import path stay byte-identical; do NOT modify any tests.')
 
-// ── #41 tiering-profile effort (Workflow path — the one path that CAN pass per-phase effort) ──
-// Inline effort ladders MIRROR profiles/tiering-profiles.yaml; tests/test_tiering_profiles.py
-// (test_wave_effort_map_in_sync) locks the shipped values so JS + YAML cannot silently diverge.
-// `inherit` ⇒ omit `effort` entirely, so the `default` profile passes NO effort and every dispatch
-// stays byte-identical to the pre-#41 wave (backward-compat).
+// ── #41 tiering profile: per-phase {model, effort} (Workflow path — the one path that CAN pass
+//    per-dispatch effort) ──
+// Inline ladders MIRROR profiles/tiering-profiles.yaml BOTH FIELDS; tests/test_tiering_profiles.py
+// (test_wave_tier_map_in_sync) locks the shipped values so JS + YAML cannot silently diverge.
+// `inherit` ⇒ omit that field entirely, so the `default` profile overrides NOTHING and every
+// dispatch stays byte-identical to the pre-#41 wave (backward-compat).
+//
+// #59 FIX — this map previously carried only the effort half, by design: #41 scoped the wave to
+// effort-only on the stated assumption that "dispatch models stay the mode's hardcoded ladder".
+// That assumption holds for 20 of the 34 dispatches. It does NOT hold for the other 14, which carry
+// no literal `model:` — 10 interpretive (spec, spec-rev, behavioral, behavioral-rev, acc-test,
+// acc-test-rev) and 4 implement (preflight, preflight2, seal, acc-run). Under any non-default
+// profile those received an `effort` while INHERITING the ambient model, which is precisely the
+// shape skills/orchemist-run.md's v4.4 hardening forbids: the subagent dies instantly at 0 tokens.
+// Observed on a consumer repo — every lane of a `budget-first` wave failed before executing a
+// single tool call, twice, while the identical lanes under `default` ran to completion.
+//
+// Carrying BOTH fields fixes that at the root AND makes the profile do what its YAML always
+// documented: `budget-first`'s sonnet-interpretive / haiku-rote ladder now actually applies,
+// instead of the model half being discarded. The guard below additionally makes the fatal shape
+// unrepresentable — `effort` is never emitted without a resolved `model`.
 const tieringProfile = A.tiering_profile || 'default'
-const EFFORT_BY_PROFILE = {
-  'default':       { rote: 'inherit', interpretive: 'inherit', implement: 'inherit', gate: 'inherit' },
-  'budget-first':  { rote: 'low',     interpretive: 'medium',  implement: 'high',    gate: 'xhigh' },
-  'quality-first': { rote: 'medium',  interpretive: 'high',    implement: 'high',    gate: 'xhigh' },
+const TIER_BY_PROFILE = {
+  'default':       { rote: { model: 'inherit', effort: 'inherit' }, interpretive: { model: 'inherit', effort: 'inherit' }, implement: { model: 'inherit', effort: 'inherit' }, gate: { model: 'inherit', effort: 'inherit' } },
+  'budget-first':  { rote: { model: 'haiku',   effort: 'low'     }, interpretive: { model: 'sonnet',  effort: 'medium'  }, implement: { model: 'opus',    effort: 'high'    }, gate: { model: 'fable',   effort: 'xhigh'   } },
+  'quality-first': { rote: { model: 'sonnet',  effort: 'medium'  }, interpretive: { model: 'opus',    effort: 'high'    }, implement: { model: 'opus',    effort: 'high'    }, gate: { model: 'fable',   effort: 'xhigh'   } },
 }
-const effortFor = (cls) => {
-  const e = (EFFORT_BY_PROFILE[tieringProfile] || EFFORT_BY_PROFILE['default'])[cls]
-  return e && e !== 'inherit' ? { effort: e } : {}
+// Spread LAST in a dispatch's options object so an explicit profile overrides the call-site default
+// (that is the profile's whole purpose); under `default` it returns {} and the call-site literal
+// stands. The gate floor is unaffected — every profile resolves `gate` to fable.
+const tierFor = (cls) => {
+  const entry = (TIER_BY_PROFILE[tieringProfile] || TIER_BY_PROFILE['default'])[cls]
+  const out = {}
+  if (entry.model && entry.model !== 'inherit') out.model = entry.model
+  // HARDENING (#59): gate `effort` on a RESOLVED model. A dispatch pinning effort while inheriting
+  // the ambient model dies at 0 tokens; dropping the effort keeps the lane alive and merely
+  // un-tiered. Reachable only via a malformed profile — the shipped three all name a model.
+  if (entry.effort && entry.effort !== 'inherit' && out.model) out.effort = entry.effort
+  return out
 }
 
 const IMPL_SCHEMA = {
@@ -843,25 +868,25 @@ if (mode === 'maintenance') {
   results = await pipeline(
     lanes,
     async (lane) => {
-      let spec = await agent(specPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+      let spec = await agent(specPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
       if (!spec) return { lane, spec: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds on the spec plan alone — the unresolved findings are NOT forwarded.`); break }
-        const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+        const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
         if (revised) spec = revised
       }
       return { lane, spec }
     },
     async ({ lane, spec }) => {
       if (!spec) return { lane, impl: null }
-      const impl = await agent(maintImplementPrompt(lane, spec), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...effortFor('implement') })
+      const impl = await agent(maintImplementPrompt(lane, spec), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...tierFor('implement') })
       return { lane, impl }
     },
     async ({ lane, impl }) => {
       if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'implement did not reach pushed state' : 'spec or implement returned null')
-      const v = await agent(maintReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+      const v = await agent(maintReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
       return reviewedRecord(lane, impl, v)
     },
   )
@@ -870,25 +895,25 @@ if (mode === 'maintenance') {
   results = await pipeline(
     lanes,
     async (lane) => {
-      let spec = await agent(specPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+      let spec = await agent(specPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
       if (!spec) return { lane, spec: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds on the spec plan alone — the unresolved findings are NOT forwarded.`); break }
-        const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+        const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
         if (revised) spec = revised
       }
       return { lane, spec }
     },
     async ({ lane, spec }) => {
       if (!spec) return { lane, impl: null }
-      const impl = await agent(codemodImplementPrompt(lane, spec), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...effortFor('implement') })
+      const impl = await agent(codemodImplementPrompt(lane, spec), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...tierFor('implement') })
       return { lane, impl }
     },
     async ({ lane, impl }) => {
       if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'implement did not reach pushed state' : 'spec or implement returned null')
-      const v = await agent(codemodReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+      const v = await agent(codemodReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
       return reviewedRecord(lane, impl, v)
     },
   )
@@ -899,33 +924,33 @@ if (mode === 'maintenance') {
   results = await pipeline(
     lanes,
     async (lane) => {
-      const research = await agent(contentResearchPrompt(lane), { label: `research:${lane.id}`, phase: 'Research', agentType: 'general-purpose', model: 'sonnet', schema: RESEARCH_SCHEMA, ...effortFor('interpretive') })
+      const research = await agent(contentResearchPrompt(lane), { label: `research:${lane.id}`, phase: 'Research', agentType: 'general-purpose', model: 'sonnet', schema: RESEARCH_SCHEMA, ...tierFor('interpretive') })
       return { lane, research: research || { notes: '(research returned null — draft proceeds from source_material alone)', verified_videos: [], corrections: '' } }
     },
     async ({ lane, research }) => {
-      const impl = await agent(contentDraftPrompt(lane, research), { label: `draft:${lane.id}`, phase: 'Draft', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: CONTENT_IMPL_SCHEMA, ...effortFor('implement') })
+      const impl = await agent(contentDraftPrompt(lane, research), { label: `draft:${lane.id}`, phase: 'Draft', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: CONTENT_IMPL_SCHEMA, ...tierFor('implement') })
       return { lane, impl }
     },
     async ({ lane, impl }) => {
       if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'draft did not reach pushed state' : 'research or draft returned null')
       let cur = impl
       // ── fact_check gate (one bounded re-draft) ──
-      let fc = await agent(contentFactCheckPrompt(lane, cur), { label: `fact-check:${lane.id}`, phase: 'Fact-check', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+      let fc = await agent(contentFactCheckPrompt(lane, cur), { label: `fact-check:${lane.id}`, phase: 'Fact-check', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
       if (fc && fc.verdict === 'REQUEST_CHANGES') {
-        const rd = await agent(contentRedraftPrompt(lane, cur, fc, 'fact-check'), { label: `redraft-fc:${lane.id}`, phase: 'Draft', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: CONTENT_IMPL_SCHEMA, ...effortFor('implement') })
+        const rd = await agent(contentRedraftPrompt(lane, cur, fc, 'fact-check'), { label: `redraft-fc:${lane.id}`, phase: 'Draft', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: CONTENT_IMPL_SCHEMA, ...tierFor('implement') })
         if (rd && rd.status === 'pushed') {
           cur = rd
-          fc = await agent(contentFactCheckPrompt(lane, cur), { label: `fact-check2:${lane.id}`, phase: 'Fact-check', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+          fc = await agent(contentFactCheckPrompt(lane, cur), { label: `fact-check2:${lane.id}`, phase: 'Fact-check', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         }
       }
       if (!fc || fc.verdict !== 'APPROVE') return contentBlocked(lane, cur, 'fact_check', fc)
       // ── red_team gate (one bounded re-draft) ──
-      let rt = await agent(contentRedTeamPrompt(lane, cur), { label: `red-team:${lane.id}`, phase: 'Red-team', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+      let rt = await agent(contentRedTeamPrompt(lane, cur), { label: `red-team:${lane.id}`, phase: 'Red-team', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
       if (rt && rt.verdict === 'REQUEST_CHANGES') {
-        const rd = await agent(contentRedraftPrompt(lane, cur, rt, 'red-team'), { label: `redraft-rt:${lane.id}`, phase: 'Draft', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: CONTENT_IMPL_SCHEMA, ...effortFor('implement') })
+        const rd = await agent(contentRedraftPrompt(lane, cur, rt, 'red-team'), { label: `redraft-rt:${lane.id}`, phase: 'Draft', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: CONTENT_IMPL_SCHEMA, ...tierFor('implement') })
         if (rd && rd.status === 'pushed') {
           cur = rd
-          rt = await agent(contentRedTeamPrompt(lane, cur), { label: `red-team2:${lane.id}`, phase: 'Red-team', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+          rt = await agent(contentRedTeamPrompt(lane, cur), { label: `red-team2:${lane.id}`, phase: 'Red-team', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         }
       }
       if (!rt || rt.verdict !== 'APPROVE') return contentBlocked(lane, cur, 'red_team', rt)
@@ -940,17 +965,17 @@ if (mode === 'maintenance') {
     lanes,
     // Stage 1 — spec → behavioral → spec_adversary
     async (lane) => {
-      let spec = await agent(standardSpecPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+      let spec = await agent(standardSpecPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
       if (!spec) return { lane, spec: null, behavioral: null }
-      let behavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...effortFor('interpretive') })
+      let behavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...tierFor('interpretive') })
       if (!behavioral) return { lane, spec, behavioral: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(standardSpecAdversaryPrompt(lane, spec, behavioral), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+        const v = await agent(standardSpecAdversaryPrompt(lane, spec, behavioral), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — acceptance_test proceeds on the behavioral contracts alone — the unresolved findings are NOT forwarded.`); break }
-        const revisedSpec = await agent(standardSpecRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+        const revisedSpec = await agent(standardSpecRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
         if (revisedSpec) spec = revisedSpec
-        const revisedBehavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral-rev:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...effortFor('interpretive') })
+        const revisedBehavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral-rev:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...tierFor('interpretive') })
         if (revisedBehavioral) behavioral = revisedBehavioral
       }
       return { lane, spec, behavioral }
@@ -958,17 +983,17 @@ if (mode === 'maintenance') {
     // Stage 2 — acceptance_test → pre-flight RED → test_adversary
     async ({ lane, spec, behavioral }) => {
       if (!spec || !behavioral) return { lane, seal: null }
-      let test = await agent(standardAcceptanceTestPrompt(lane, spec, behavioral), { label: `acc-test:${lane.id}`, phase: 'Acceptance Test', agentType: 'orchemist-tester', schema: SEALED_TEST_SCHEMA, ...effortFor('interpretive') })
+      let test = await agent(standardAcceptanceTestPrompt(lane, spec, behavioral), { label: `acc-test:${lane.id}`, phase: 'Acceptance Test', agentType: 'orchemist-tester', schema: SEALED_TEST_SCHEMA, ...tierFor('interpretive') })
       if (!test) return { lane, seal: null }
-      let pf = await agent(standardPreflightPrompt(lane, test), { label: `preflight:${lane.id}`, phase: 'Acceptance Test', agentType: 'general-purpose', isolation: 'worktree', schema: PREFLIGHT_SCHEMA, ...effortFor('implement') })
+      let pf = await agent(standardPreflightPrompt(lane, test), { label: `preflight:${lane.id}`, phase: 'Acceptance Test', agentType: 'general-purpose', isolation: 'worktree', schema: PREFLIGHT_SCHEMA, ...tierFor('implement') })
       if (!pf) return { lane, seal: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(standardTestAdversaryPrompt(lane, test, pf), { label: `test-adv:${lane.id}`, phase: 'Test Adversary', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+        const v = await agent(standardTestAdversaryPrompt(lane, test, pf), { label: `test-adv:${lane.id}`, phase: 'Test Adversary', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: test-adversary still REQUEST_CHANGES after 1 revise — SEAL proceeds on the sealed test as it stands — the unresolved findings are NOT forwarded.`); break }
-        test = await agent(standardAcceptanceTestRevisePrompt(lane, test, v), { label: `acc-test-rev:${lane.id}`, phase: 'Acceptance Test', agentType: 'orchemist-tester', schema: SEALED_TEST_SCHEMA, ...effortFor('interpretive') })
+        test = await agent(standardAcceptanceTestRevisePrompt(lane, test, v), { label: `acc-test-rev:${lane.id}`, phase: 'Acceptance Test', agentType: 'orchemist-tester', schema: SEALED_TEST_SCHEMA, ...tierFor('interpretive') })
         if (!test) return { lane, seal: null }
-        pf = await agent(standardPreflightPrompt(lane, test), { label: `preflight2:${lane.id}`, phase: 'Acceptance Test', agentType: 'general-purpose', isolation: 'worktree', schema: PREFLIGHT_SCHEMA, ...effortFor('implement') })
+        pf = await agent(standardPreflightPrompt(lane, test), { label: `preflight2:${lane.id}`, phase: 'Acceptance Test', agentType: 'general-purpose', isolation: 'worktree', schema: PREFLIGHT_SCHEMA, ...tierFor('implement') })
         if (!pf) return { lane, seal: null }
       }
       return { lane, test, pf }
@@ -976,19 +1001,19 @@ if (mode === 'maintenance') {
     // Stage 3 — SEAL
     async ({ lane, test, pf }) => {
       if (!pf) return { lane, seal: null }
-      const seal = await agent(standardSealPrompt(lane, test, pf), { label: `seal:${lane.id}`, phase: 'Seal', agentType: 'general-purpose', isolation: 'worktree', schema: SEAL_SCHEMA, ...effortFor('implement') })
+      const seal = await agent(standardSealPrompt(lane, test, pf), { label: `seal:${lane.id}`, phase: 'Seal', agentType: 'general-purpose', isolation: 'worktree', schema: SEAL_SCHEMA, ...tierFor('implement') })
       return { lane, seal }
     },
     // Stage 4 — implement
     async ({ lane, seal }) => {
       if (!seal || seal.status !== 'sealed') return { lane, impl: null, seal }
-      const impl = await agent(standardImplementPrompt(lane, seal), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...effortFor('implement') })
+      const impl = await agent(standardImplementPrompt(lane, seal), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...tierFor('implement') })
       return { lane, impl, seal }
     },
     // Stage 5 — acceptance_run
     async ({ lane, impl, seal }) => {
       if (!impl || impl.status !== 'pushed') return { lane, impl, seal, run: null }
-      const run = await agent(standardAcceptanceRunPrompt(lane, impl, seal), { label: `acc-run:${lane.id}`, phase: 'Acceptance Run', agentType: 'general-purpose', isolation: 'worktree', schema: ACCEPTANCE_RUN_SCHEMA, ...effortFor('implement') })
+      const run = await agent(standardAcceptanceRunPrompt(lane, impl, seal), { label: `acc-run:${lane.id}`, phase: 'Acceptance Run', agentType: 'general-purpose', isolation: 'worktree', schema: ACCEPTANCE_RUN_SCHEMA, ...tierFor('implement') })
       return { lane, impl, seal, run }
     },
     // Stage 6 — review (blocked records are built HERE, the final stage, so lane/issue/branch
@@ -1001,7 +1026,7 @@ if (mode === 'maintenance') {
         return blockedRecord(lane, impl, reason)
       }
       if (!run || !run.seal_intact || run.failed > 0) return blockedRecord(lane, impl, run ? `acceptance_run: seal_intact=${run.seal_intact} failed=${run.failed}` : 'acceptance_run returned null')
-      const v = await agent(standardReviewPrompt(lane, impl, run), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+      const v = await agent(standardReviewPrompt(lane, impl, run), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
       return reviewedRecord(lane, impl, v)
     },
   )
@@ -1009,10 +1034,10 @@ if (mode === 'maintenance') {
   // Refactor mode (the original EPIC #942 flow): implement → review, no barrier.
   results = await pipeline(
     lanes,
-    (lane) => agent(refactorImplementPrompt(lane), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...effortFor('implement') }).then((impl) => ({ lane, impl })),
+    (lane) => agent(refactorImplementPrompt(lane), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...tierFor('implement') }).then((impl) => ({ lane, impl })),
     ({ lane, impl }) => {
       if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'implement did not reach pushed state' : 'implementer returned null')
-      return agent(refactorReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') }).then((v) => reviewedRecord(lane, impl, v))
+      return agent(refactorReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') }).then((v) => reviewedRecord(lane, impl, v))
     },
   )
 }

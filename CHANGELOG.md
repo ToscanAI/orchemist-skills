@@ -4,6 +4,29 @@ All notable changes to the orchemist-skills pack are recorded here. The pipeline
 
 This changelog uses [Semantic Versioning](https://semver.org/) for the pipeline YAML version field.
 
+## [wave-tiering-fix] — 2026-08-05
+
+### Fixed — a non-default `tiering_profile` made `orchemist-wave` unrunnable (closes [#59](https://github.com/ToscanAI/orchemist-skills/issues/59); follow-up to [#41](https://github.com/ToscanAI/orchemist-skills/issues/41))
+
+Selecting `tiering_profile: "budget-first"` (or `"quality-first"`) killed every lane of a wave before it executed a single tool call: each dispatch returned **0 tokens, 0 tool uses** and an immediate API error, and the wave surfaced it as `BLOCKED_IMPLEMENT — "spec or implement returned null"`, which reads like a content failure rather than the infrastructure failure it is.
+
+**Root cause.** #41 scoped the wave's inline ladder to the **effort half only**, on the stated assumption that *"dispatch models stay the mode's hardcoded ladder"*. That assumption holds for 20 of the 34 dispatches. It does not hold for the other **14**, which carry no literal `model:` — 10 `interpretive` (`spec`, `spec-rev`, `behavioral`, `behavioral-rev`, `acc-test`, `acc-test-rev`) and 4 `implement` (`preflight`, `preflight2`, `seal`, `acc-run`). Under a non-default profile those received an `effort` while **inheriting** the ambient model — precisely the shape `skills/orchemist-run.md`'s v4.4 hardening forbids ("Always pass an EXPLICIT model … a dispatch that inherits the ambient configuration dies instantly"). The first such dispatch in every mode is `spec`, so a wave died at its first agent.
+
+**Diagnosis was by controlled experiment, not inference.** Same repo, same lanes, same prompts: `budget-first` → 0 agents completed (twice); a plain `Agent` dispatch with neither model nor effort → succeeded in 6s; `tiering_profile: "default"` → 8 of 9 agents completed, 982k tokens.
+
+- **`EFFORT_BY_PROFILE` → `TIER_BY_PROFILE`**, now carrying **both** `model` and `effort` per phase_class, mirroring `profiles/tiering-profiles.yaml` in full. A side effect worth naming: `budget-first`'s sonnet-interpretive and `quality-first`'s opus-interpretive ladders now **actually apply** — previously the model half was discarded, so those profiles were half-implemented.
+- **`effortFor(cls)` → `tierFor(cls)`**, which resolves `{model, effort}` and **never emits `effort` without a resolved `model`**, making the fatal shape unrepresentable rather than merely absent today.
+- **`default` is byte-identical to before.** Every class resolves to `inherit`, `tierFor` returns `{}`, and each call-site literal stands untouched. The spread stays last in every options object, so an explicit profile overrides the call-site default — which is the profile's entire purpose.
+- **The Fable gate floor is unaffected**: all three shipped profiles resolve `gate` to `fable`, and that is still asserted by `assert_gate_floor`.
+
+### Fixed — the sync test compared only half the profile
+
+`test_wave_effort_map_in_sync` asserted the `effort` values appeared in the wave JS and never checked `model`, which is why a JS map carrying only the effort half passed CI indefinitely.
+
+- Renamed to **`test_wave_tier_map_in_sync`** and now asserts the full `cls: { model: 'M', effort: 'E' }` entry per class, whitespace-tolerant.
+- New **`test_wave_never_dispatches_effort_without_model`** enforces the v4.4 hardening structurally: `tierFor` must gate `effort` on a resolved model, and no `agent()` dispatch may pin an `effort` literal without a `model` literal.
+- Both new tests were mutation-verified — they fail against the pre-fix `orchemist-wave.js` and pass against the fixed one.
+
 ## [node-installer] — 2026-07-28
 
 ### Changed — `install.sh` replaced by `install.mjs` + `npm run install:pack` (closes [#52](https://github.com/ToscanAI/orchemist-skills/issues/52); follow-up to [#50](https://github.com/ToscanAI/orchemist-skills/issues/50))
