@@ -4,6 +4,48 @@ All notable changes to the orchemist-skills pack are recorded here. The pipeline
 
 This changelog uses [Semantic Versioning](https://semver.org/) for the pipeline YAML version field.
 
+## [wave-recon-phase] — 2026-08-05
+
+### Added — Phase 0 recon for the wave's planning modes (closes [#58](https://github.com/ToscanAI/orchemist-skills/issues/58))
+
+The single-issue pipelines open with `existing_symbols_inventory`. The wave did not — it folded grounding into a single clause of the spec prompt (*"Recon the area-of-change in the repo, then plan"*). Grounding was requested, but as an instruction rather than a phase, which cost three things: no separately inspectable output, no fresh-context separation between surveying and planning, and — the load-bearing one — the **spec-adversary could only check the plan against its own reading of the code, never against the evidence the plan was built on**.
+
+`maintenance`, `codemod` and `standard` now each dispatch a read-only **recon** per lane before `spec`. (`refactor` goes straight to implement; `content` has its own `research` front-end.)
+
+- **`reconPrompt` + `RECON_SCHEMA`** — returns `{ findings, files, seal_surface, open_questions }`. The prompt asks explicitly for what already **exists** that the lane might otherwise rebuild, and tells the agent that *"this does not exist"* is a valid and load-bearing answer rather than something to paper over. It also instructs reading each candidate file's **header** to determine seal status rather than inferring from its folder, since a folder commonly mixes sealed and unsealed files.
+- **Both the spec AND the spec-adversary receive it.** The adversary gains a first decisive check — *PLAN vs EVIDENCE: does the plan contradict the recon — asserting something exists that the recon found absent, rebuilding something it found present, or ignoring an open question it raised?* The revise prompts receive it too, so a revision cannot "solve" a finding by drifting off verified evidence.
+- **The superseded inline clause is removed** from both spec prompts.
+- **`meta.phases`, the `whenToUse` blurb and the run-start banner** all now name the phase, per the #55 invariant that the wave must never misdescribe its own behaviour.
+
+**Why field data motivated this.** On a consumer repo a dedicated recon repeatedly *changed* the design rather than confirming it: establishing that no paragraph-style information is read anywhere in an importer (killing the obvious approach before a line was written); that a scoping column already existed (collapsing a planned schema migration into signature plumbing); and that an issue's item had already been delivered by an earlier change (a lane would otherwise have built a duplicate guard, which is a real defect, not a no-op).
+
+**Deliberately not a file artifact.** The recon returns structured output. The wave has no artifact convention — only worktree-isolated implement agents write anything — and the harness already persists every agent's return value to the run's `journal.jsonl`. Writing a file would dirty the consumer's working tree for no gain in durability. This is a conscious deviation from #58's own suggested acceptance criterion, recorded here rather than silently taken.
+
+- New `tests/test_wave_recon_phase.py` (18 tests): the phase exists in exactly the three planning modes; uses `general-purpose` (not a read-only subagent type, per [#9](https://github.com/ToscanAI/orchemist-skills/issues/9)); declares no worktree; **precedes** the spec it feeds; both the spec family and both adversaries render it; a null recon degrades loudly rather than rendering empty; and the self-description is accurate. All 18 were mutation-verified — they fail against the pre-#58 wave and pass after — including explicit non-vacuity guards on the two that would otherwise pass trivially when zero recon dispatches exist.
+
+## [wave-tiering-fix] — 2026-08-05
+
+### Fixed — a non-default `tiering_profile` made `orchemist-wave` unrunnable (closes [#59](https://github.com/ToscanAI/orchemist-skills/issues/59); follow-up to [#41](https://github.com/ToscanAI/orchemist-skills/issues/41))
+
+Selecting `tiering_profile: "budget-first"` (or `"quality-first"`) killed every lane of a wave before it executed a single tool call: each dispatch returned **0 tokens, 0 tool uses** and an immediate API error, and the wave surfaced it as `BLOCKED_IMPLEMENT — "spec or implement returned null"`, which reads like a content failure rather than the infrastructure failure it is.
+
+**Root cause.** #41 scoped the wave's inline ladder to the **effort half only**, on the stated assumption that *"dispatch models stay the mode's hardcoded ladder"*. That assumption holds for 20 of the 34 dispatches. It does not hold for the other **14**, which carry no literal `model:` — 10 `interpretive` (`spec`, `spec-rev`, `behavioral`, `behavioral-rev`, `acc-test`, `acc-test-rev`) and 4 `implement` (`preflight`, `preflight2`, `seal`, `acc-run`). Under a non-default profile those received an `effort` while **inheriting** the ambient model — precisely the shape `skills/orchemist-run.md`'s v4.4 hardening forbids ("Always pass an EXPLICIT model … a dispatch that inherits the ambient configuration dies instantly"). The first such dispatch in every mode is `spec`, so a wave died at its first agent.
+
+**Diagnosis was by controlled experiment, not inference.** Same repo, same lanes, same prompts: `budget-first` → 0 agents completed (twice); a plain `Agent` dispatch with neither model nor effort → succeeded in 6s; `tiering_profile: "default"` → 8 of 9 agents completed, 982k tokens.
+
+- **`EFFORT_BY_PROFILE` → `TIER_BY_PROFILE`**, now carrying **both** `model` and `effort` per phase_class, mirroring `profiles/tiering-profiles.yaml` in full. A side effect worth naming: `budget-first`'s sonnet-interpretive and `quality-first`'s opus-interpretive ladders now **actually apply** — previously the model half was discarded, so those profiles were half-implemented.
+- **`effortFor(cls)` → `tierFor(cls)`**, which resolves `{model, effort}` and **never emits `effort` without a resolved `model`**, making the fatal shape unrepresentable rather than merely absent today.
+- **`default` is byte-identical to before.** Every class resolves to `inherit`, `tierFor` returns `{}`, and each call-site literal stands untouched. The spread stays last in every options object, so an explicit profile overrides the call-site default — which is the profile's entire purpose.
+- **The Fable gate floor is unaffected**: all three shipped profiles resolve `gate` to `fable`, and that is still asserted by `assert_gate_floor`.
+
+### Fixed — the sync test compared only half the profile
+
+`test_wave_effort_map_in_sync` asserted the `effort` values appeared in the wave JS and never checked `model`, which is why a JS map carrying only the effort half passed CI indefinitely.
+
+- Renamed to **`test_wave_tier_map_in_sync`** and now asserts the full `cls: { model: 'M', effort: 'E' }` entry per class, whitespace-tolerant.
+- New **`test_wave_never_dispatches_effort_without_model`** enforces the v4.4 hardening structurally: `tierFor` must gate `effort` on a resolved model, and no `agent()` dispatch may pin an `effort` literal without a `model` literal.
+- Both new tests were mutation-verified — they fail against the pre-fix `orchemist-wave.js` and pass against the fixed one.
+
 ## [node-installer] — 2026-07-28
 
 ### Changed — `install.sh` replaced by `install.mjs` + `npm run install:pack` (closes [#52](https://github.com/ToscanAI/orchemist-skills/issues/52); follow-up to [#50](https://github.com/ToscanAI/orchemist-skills/issues/50))

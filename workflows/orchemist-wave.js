@@ -3,8 +3,9 @@ export const meta = {
   description:
     'Parallel "wave" orchestrator for Orchemist: fan N independent, file-disjoint lanes through a per-lane pipeline — mode:"refactor" runs implement → independent fable review; mode:"maintenance" runs the maintenance pipeline per lane (spec → fable spec-adversary → implement+focused-test → independent fable review); mode:"codemod" runs a behavior-preserving lint/codemod cleanup WITH the same spec + fable spec-adversary planning gate (spec → fable spec-adversary → codemod-implement → independent fable review, no new test); mode:"content" runs the content pipeline per lane (research → draft(opus, real committed diff) → fact_check(fable gate) → red_team(fable gate), each gate with one bounded re-draft) for in-app content authored as a code diff; mode:"standard" runs the full sealed-acceptance flow per lane for NEW, file-disjoint, sealable behavior (spec → behavioral → spec_adversary(fable) → acceptance_test(orchemist-tester) → pre-flight RED → test_adversary(fable) → SEAL(sha256-hash + commit) → implement → acceptance_run (re-hash) → review(fable)). Per-lane lockstep, each lane sealed in its own git worktree. Produces reviewed, pushed branches + per-lane merge-readiness verdicts. Does NOT merge — the merge-coordination (branch-protection toggle + squash-merge + composition full-suite) stays a deliberate, outward-facing operator step.',
   whenToUse:
-    'When several file-DISJOINT lanes are ready at once. mode:"refactor" (default) — behavior-preserving changes (a god-module decomposition, a mechanical codemod); each lane needs an immutable contract (a surface/contract test + the full suite). mode:"maintenance" — a batch of independent bug/infra/CI/data fixes; each lane runs the maintenance pipeline (spec → fable adversary → implement + a FOCUSED test → fable review), the right-sized flow that adds behavior + tests (NOT behavior-preserving). mode:"codemod" — the middle ground: a behavior-preserving lint/codemod cleanup (e.g. driving a per-package bulk-suppression baseline to zero) that still wants the spec + fable-adversary planning gate but adds NO behavior and NO new test. mode:"content" — a batch of independent in-app CONTENT modules (a gated route-page + a data-file entry + a curated link/video allowlist), each authored as a real committed diff and gated by a source-grounded fact_check + an IP/brand red_team (both fable, blocking); pre-place each lane\'s operator-refined source_material.md and pass its absolute path as lane.sourceFile. mode:"standard" — a batch of independent NEW, file-disjoint, sealable-behavior modules (e.g. a Black-Scholes engine + indicator modules) that need the FULL sealed-acceptance bar (spec → behavioral → spec_adversary(fable) → acceptance_test(orchemist-tester) → pre-flight RED → test_adversary(fable) → SEAL → implement → acceptance_run → review(fable)) — stronger than mode:"maintenance"\'s single spec-adversary gate + focused test. Rule of thumb: serialize lanes WITHIN one module (same files), parallelize ACROSS modules (disjoint dirs compose cleanly).',
+    'When several file-DISJOINT lanes are ready at once. mode:"refactor" (default) — behavior-preserving changes (a god-module decomposition, a mechanical codemod); each lane needs an immutable contract (a surface/contract test + the full suite). mode:"maintenance" — a batch of independent bug/infra/CI/data fixes; each lane runs the maintenance pipeline (recon → spec → fable adversary → implement + a FOCUSED test → fable review), the right-sized flow that adds behavior + tests (NOT behavior-preserving). mode:"codemod" — the middle ground: a behavior-preserving lint/codemod cleanup (e.g. driving a per-package bulk-suppression baseline to zero) that still wants the recon + spec + fable-adversary planning gate but adds NO behavior and NO new test. mode:"content" — a batch of independent in-app CONTENT modules (a gated route-page + a data-file entry + a curated link/video allowlist), each authored as a real committed diff and gated by a source-grounded fact_check + an IP/brand red_team (both fable, blocking); pre-place each lane\'s operator-refined source_material.md and pass its absolute path as lane.sourceFile. mode:"standard" — a batch of independent NEW, file-disjoint, sealable-behavior modules (e.g. a Black-Scholes engine + indicator modules) that need the FULL sealed-acceptance bar (recon → spec → behavioral → spec_adversary(fable) → acceptance_test(orchemist-tester) → pre-flight RED → test_adversary(fable) → SEAL → implement → acceptance_run → review(fable)) — stronger than mode:"maintenance"\'s single spec-adversary gate + focused test. Rule of thumb: serialize lanes WITHIN one module (same files), parallelize ACROSS modules (disjoint dirs compose cleanly).',
   phases: [
+    { title: 'Recon', detail: 'maintenance + codemod + standard modes — one general-purpose per lane inventories what EXISTS before any approach is chosen; its findings feed BOTH the spec and the spec-adversary (#58)', model: 'sonnet' },
     { title: 'Spec', detail: 'maintenance + codemod + standard modes — spec + fable spec-adversary per lane (the pre-implement quality gate)', model: 'fable' },
     { title: 'Research', detail: 'content mode — one general-purpose (sonnet) per lane: web-verify links/videos + confirm the correctness anchors', model: 'sonnet' },
     { title: 'Behavioral', detail: 'standard mode — one general-purpose (sonnet) per lane derives numbered "When X, the system Y" contracts from spec.observable_outcomes', model: 'sonnet' },
@@ -128,20 +129,45 @@ const invariant =
     ? 'NEW, sealable behavior gated by an immutable, adversarially-reviewed acceptance test — you MUST make the sealed test pass; you MUST NOT modify, delete, or work around the sealed test file under any path (an apparent test defect is a BLOCKED report, never a silent edit). This is NOT a behavior-preserving refactor — there is no surface-diff/facade requirement. Edit ONLY the planned files. middleware HARD-NO.'
     : 'Behavior 100% unchanged; the public surface and every caller import path stay byte-identical; do NOT modify any tests.')
 
-// ── #41 tiering-profile effort (Workflow path — the one path that CAN pass per-phase effort) ──
-// Inline effort ladders MIRROR profiles/tiering-profiles.yaml; tests/test_tiering_profiles.py
-// (test_wave_effort_map_in_sync) locks the shipped values so JS + YAML cannot silently diverge.
-// `inherit` ⇒ omit `effort` entirely, so the `default` profile passes NO effort and every dispatch
-// stays byte-identical to the pre-#41 wave (backward-compat).
+// ── #41 tiering profile: per-phase {model, effort} (Workflow path — the one path that CAN pass
+//    per-dispatch effort) ──
+// Inline ladders MIRROR profiles/tiering-profiles.yaml BOTH FIELDS; tests/test_tiering_profiles.py
+// (test_wave_tier_map_in_sync) locks the shipped values so JS + YAML cannot silently diverge.
+// `inherit` ⇒ omit that field entirely, so the `default` profile overrides NOTHING and every
+// dispatch stays byte-identical to the pre-#41 wave (backward-compat).
+//
+// #59 FIX — this map previously carried only the effort half, by design: #41 scoped the wave to
+// effort-only on the stated assumption that "dispatch models stay the mode's hardcoded ladder".
+// That assumption holds for 20 of the 34 dispatches. It does NOT hold for the other 14, which carry
+// no literal `model:` — 10 interpretive (spec, spec-rev, behavioral, behavioral-rev, acc-test,
+// acc-test-rev) and 4 implement (preflight, preflight2, seal, acc-run). Under any non-default
+// profile those received an `effort` while INHERITING the ambient model, which is precisely the
+// shape skills/orchemist-run.md's v4.4 hardening forbids: the subagent dies instantly at 0 tokens.
+// Observed on a consumer repo — every lane of a `budget-first` wave failed before executing a
+// single tool call, twice, while the identical lanes under `default` ran to completion.
+//
+// Carrying BOTH fields fixes that at the root AND makes the profile do what its YAML always
+// documented: `budget-first`'s sonnet-interpretive / haiku-rote ladder now actually applies,
+// instead of the model half being discarded. The guard below additionally makes the fatal shape
+// unrepresentable — `effort` is never emitted without a resolved `model`.
 const tieringProfile = A.tiering_profile || 'default'
-const EFFORT_BY_PROFILE = {
-  'default':       { rote: 'inherit', interpretive: 'inherit', implement: 'inherit', gate: 'inherit' },
-  'budget-first':  { rote: 'low',     interpretive: 'medium',  implement: 'high',    gate: 'xhigh' },
-  'quality-first': { rote: 'medium',  interpretive: 'high',    implement: 'high',    gate: 'xhigh' },
+const TIER_BY_PROFILE = {
+  'default':       { rote: { model: 'inherit', effort: 'inherit' }, interpretive: { model: 'inherit', effort: 'inherit' }, implement: { model: 'inherit', effort: 'inherit' }, gate: { model: 'inherit', effort: 'inherit' } },
+  'budget-first':  { rote: { model: 'haiku',   effort: 'low'     }, interpretive: { model: 'sonnet',  effort: 'medium'  }, implement: { model: 'opus',    effort: 'high'    }, gate: { model: 'fable',   effort: 'xhigh'   } },
+  'quality-first': { rote: { model: 'sonnet',  effort: 'medium'  }, interpretive: { model: 'opus',    effort: 'high'    }, implement: { model: 'opus',    effort: 'high'    }, gate: { model: 'fable',   effort: 'xhigh'   } },
 }
-const effortFor = (cls) => {
-  const e = (EFFORT_BY_PROFILE[tieringProfile] || EFFORT_BY_PROFILE['default'])[cls]
-  return e && e !== 'inherit' ? { effort: e } : {}
+// Spread LAST in a dispatch's options object so an explicit profile overrides the call-site default
+// (that is the profile's whole purpose); under `default` it returns {} and the call-site literal
+// stands. The gate floor is unaffected — every profile resolves `gate` to fable.
+const tierFor = (cls) => {
+  const entry = (TIER_BY_PROFILE[tieringProfile] || TIER_BY_PROFILE['default'])[cls]
+  const out = {}
+  if (entry.model && entry.model !== 'inherit') out.model = entry.model
+  // HARDENING (#59): gate `effort` on a RESOLVED model. A dispatch pinning effort while inheriting
+  // the ambient model dies at 0 tokens; dropping the effort keeps the lane alive and merely
+  // un-tiered. Reachable only via a malformed profile — the shipped three all name a model.
+  if (entry.effort && entry.effort !== 'inherit' && out.model) out.effort = entry.effort
+  return out
 }
 
 const IMPL_SCHEMA = {
@@ -323,11 +349,73 @@ suite = ${impl.suite || '(none)'} · files = ${(impl.files || []).join(', ') || 
 Return the StructuredOutput: verdict, blockers (numbered, file:line + why), majors, surface_diff_clean (bool), notes. REQUEST_CHANGES on any blocker or any real surface regression.`
 }
 
+// ── Phase 0 recon (#58) — maintenance / codemod / standard ──
+// The single-issue pipelines open with `existing_symbols_inventory`; the wave did not, folding it
+// into one clause of the spec prompt ("Recon the area-of-change, then plan"). That made grounding an
+// instruction rather than a phase, with three costs: no separately inspectable output, no fresh-context
+// separation between surveying and planning, and — the load-bearing one — the spec_adversary could
+// only check the plan against its OWN reading, never against the evidence the plan was built on.
+//
+// Consumer field data (fiskaltrust/legal): a dedicated recon repeatedly CHANGED the design rather
+// than confirming it — establishing that no paragraph-style information is read anywhere (killing the
+// obvious approach before a line was written), that a scoping column already existed (collapsing a
+// migration into signature plumbing), and that an issue's item was already delivered (a lane would
+// otherwise have built a duplicate guard).
+//
+// The recon returns StructuredOutput rather than writing a file: the wave has no artifact convention,
+// only worktree-isolated implement agents write, and the harness already persists every agent's return
+// value to the run's journal.jsonl — durable and inspectable without dirtying the consumer's tree.
+const RECON_SCHEMA = {
+  type: 'object',
+  additionalProperties: true,
+  required: ['findings'],
+  properties: {
+    findings: { type: 'string', description: 'What EXISTS today in the area of change, file:line throughout. Real signatures, quoted. The inventory the plan must be built on.' },
+    files: { type: 'array', items: { type: 'string' }, description: 'The files the change will actually touch, as DISCOVERED — may refine the lane brief, which is a hypothesis.' },
+    seal_surface: { type: 'string', description: 'Sealed / byte-locked / SHA-pinned / frozen files near the change, named explicitly. Empty string if genuinely none.' },
+    open_questions: { type: 'string', description: 'Genuine uncertainties for the spec to resolve. "Nothing exists yet" is a valid and important finding — say so rather than guessing.' },
+  },
+}
+
+function reconPrompt(lane) {
+  return `You are the RECON agent (Phase 0) for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Inventory what EXISTS. READ-ONLY — no edits, no branch, no commits, and you are NOT in a worktree.
+
+## The change this lane will make
+${lane.implement}
+
+## Files the lane brief NAMES (a hypothesis to verify, not a given)
+${lane.files || '(not specified — discover them)'}
+
+## Your job
+Survey the real code and report what is THERE, so the spec plans against evidence instead of assumption. Do NOT propose a design, a fix, or an approach — that is the spec's job, and a recon that pre-commits to one defeats the separation.
+
+1. **The area of change** — the functions/types/call sites the lane will touch. Quote REAL signatures with file:line. Where the lane brief's file list is wrong or incomplete, say so.
+2. **What already exists that the lane might otherwise rebuild.** The highest-value finding in this whole phase: a field, guard, helper or column that already does the job, or an item the issue asks for that a previous change ALREADY delivered. Re-implementing an existing guard is a real defect, not a harmless duplicate.
+3. **The seal surface** — sealed / byte-locked / SHA-pinned / frozen files near the change. Read each candidate's HEADER rather than inferring from its folder; in most repos seal status is declared per file, and a folder often mixes sealed and unsealed. Name every one the change could perturb.
+4. **What the change could break** — the tests and callers in its blast radius, named individually, not as a category.
+5. **Open questions** — genuine uncertainties the spec must decide. **"This does not exist"** is a valid and load-bearing answer; report it plainly rather than guessing, because it usually changes the design.
+
+Cite file:line throughout. Prefer "I checked X and it is not there" over silence — an absence you verified is evidence; an absence you assumed is not.
+
+Return the StructuredOutput: { findings, files, seal_surface, open_questions }.`
+}
+
+// Rendered into the spec + adversary prompts. Kept compact: the adversary needs the evidence to check
+// the plan AGAINST, not a second copy of the codebase.
+function reconBlock(recon) {
+  if (!recon) return '(Phase 0 recon unavailable — this lane is planning WITHOUT an inventory; treat every claim about existing code as unverified and check it yourself.)'
+  return `${recon.findings}
+
+FILES DISCOVERED: ${(recon.files || []).join(', ') || '(none reported)'}
+SEAL SURFACE: ${recon.seal_surface || '(none reported)'}
+OPEN QUESTIONS: ${recon.open_questions || '(none reported)'}`
+}
+
 // ── maintenance/codemod-mode prompts (shared spec trio + per-mode implement/review) ──
 // laneKind is reached ONLY by codemod + maintenance (refactor never calls the trio);
 // with mode==='maintenance' it is the literal 'bug/infra/data fix' the trio always used.
 const laneKind = mode === 'codemod' ? 'behavior-preserving codemod/lint cleanup' : 'bug/infra/data fix'
-function specPrompt(lane) {
+function specPrompt(lane, recon) {
   return `You are the SPEC agent for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Produce a FOCUSED implementation plan for this ${laneKind} (WHAT + HOW). READ-ONLY — no code edits.
 
 ## The change
@@ -336,16 +424,24 @@ ${lane.implement}
 ## Files this lane may touch
 ${lane.files || '(infer from the change; keep it minimal + file-disjoint from sibling lanes)'}
 
-Recon the area-of-change in the repo, then plan: the EXACT files to edit, the approach, the SEAL SURFACE to AVOID (verify-scripts/SHA-pins near the change — or, if a seal-break is genuinely required, name the exact pin to re-baseline and why it's anticipated), and the VALIDATION plan: ${mode === 'codemod' ? 'lint+typecheck+suite stay GREEN AND the target bulk-suppression file shrinks to ONLY the pre-declared protected residual (name the residual entries you keep + why each is load-bearing) — no new test.' : 'a FOCUSED unit/e2e test if locally testable, else the concrete PROD-VALIDATION steps.'} Do NOT propose a heavyweight sealed verify-script.
+## Phase 0 recon — what a fresh agent found ACTUALLY EXISTS (#58)
+${reconBlock(recon)}
+
+Build the plan ON that inventory: it is evidence, gathered before any approach was chosen. Where it says something already exists, CONSUME it — do not rebuild it. Where it flags an open question, RESOLVE it rather than leaving it implicit. Where it contradicts the lane brief's file list, prefer the recon and say so; the brief is a hypothesis, the recon is what is there. If you must contradict the recon, verify against the real code first and state why.
+
+Plan: the EXACT files to edit, the approach, the SEAL SURFACE to AVOID (verify-scripts/SHA-pins near the change — or, if a seal-break is genuinely required, name the exact pin to re-baseline and why it's anticipated), and the VALIDATION plan: ${mode === 'codemod' ? 'lint+typecheck+suite stay GREEN AND the target bulk-suppression file shrinks to ONLY the pre-declared protected residual (name the residual entries you keep + why each is load-bearing) — no new test.' : 'a FOCUSED unit/e2e test if locally testable, else the concrete PROD-VALIDATION steps.'} Do NOT propose a heavyweight sealed verify-script.
 
 Return the StructuredOutput: { plan: <the full plan>, files: [...], validation: <focused-test (which) | prod-validation steps> }.`
 }
 
-function specRevisePrompt(lane, prevPlan, verdict) {
+function specRevisePrompt(lane, prevPlan, verdict, recon) {
   return `You are the SPEC agent REVISING the plan for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}). An independent fable adversary found problems. Apply the VERBATIM fixes; keep everything else stable. READ-ONLY.
 
 ## The change
 ${lane.implement}
+
+## Phase 0 recon — the same inventory the original plan was built on (#58)
+${reconBlock(recon)}
 
 ## Previous plan
 ${prevPlan}
@@ -353,19 +449,25 @@ ${prevPlan}
 ## Adversary findings (address every blocker)
 ${(verdict.blockers || []).map((b, i) => `${i + 1}. ${b}`).join('\n') || verdict.notes || '(see notes)'}
 
+Fix what was found without drifting off the recon: a revision that "solves" a finding by contradicting verified evidence has traded one defect for a worse one.
+
 Return the StructuredOutput: { plan, files, validation } — the corrected plan.`
 }
 
-function specAdversaryPrompt(lane, spec) {
+function specAdversaryPrompt(lane, spec, recon) {
   return `You are the SPEC ADVERSARY (Fable 5) for ${mode}-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Independently pressure-test the fix APPROACH for correctness, safety, timing, seal-impact, and missed edge cases — the key quality gate for ${mode === 'codemod' ? 'behavior-preserving cleanup work' : 'prod-affecting maintenance work'}. READ-ONLY; verify against the REAL code.
 
 ## The change
 ${lane.implement}
 
+## Phase 0 recon — the evidence the plan was built on (#58)
+${reconBlock(recon)}
+
 ## Proposed plan (vet it)
 ${spec.plan}
 
 ## Decisive checks
+- PLAN vs EVIDENCE: does the plan CONTRADICT the recon — asserting something exists that the recon found absent, rebuilding something the recon found already present, or ignoring an open question it raised? That is the cheapest real defect to catch here, and you are the only phase holding both documents. Treat the recon as evidence, not gospel: if you believe IT is wrong, verify against the real code and say so explicitly.
 - ${mode === 'codemod' ? 'Does the plan PRESERVE behavior AND drive the target bulk-suppression file to the declared residual? Is each fix auto-fixable-style (`eslint --fix`) OR an inline `// eslint-disable-next-line <rule> -- <reason>` with a real load-bearing rationale (not a blanket re-suppress)?' : 'Does the approach actually fix the issue, end-to-end? Any path it misses?'}
 - SEAL IMPACT: does it touch a byte-locked / SHA-pinned / HARD-NO surface unexpectedly? Is any seal-break genuinely anticipated + named (vs a surprise)?
 - NIGHTLY SEAL FOOTPRINT: if the lane adds a shared-type field, a cross-package importer, or a new test / \`__tests__\` file, does the plan enumerate the NIGHTLY/AGGREGATE-only pins that footprint touches — a count·keyof / field-count / set-equality pin AND any recursive importer/dir allowlist (typically globs \`__tests__/\`) — BEYOND the lane's OWN verify script, and NAME each such pin to re-baseline? A lane green on its own suite can still land RED on the post-merge full-suite; catch it pre-merge.
@@ -585,7 +687,7 @@ Return the StructuredOutput: status ('pushed' only if green + pushed; else 'bloc
 }
 
 // ── standard-mode prompts (sealed-acceptance flow per lane, mirrors coding-pipeline-standard.yaml) ──
-function standardSpecPrompt(lane) {
+function standardSpecPrompt(lane, recon) {
   return `You are the SPEC agent for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Produce a FOCUSED implementation plan for this NEW, sealable-behavior module (Section B: Implementation Guidance — problem statement, files to touch, implementation steps, risk assessment). READ-ONLY — no code edits, no worktree.
 
 ## The change
@@ -594,16 +696,26 @@ ${lane.implement}
 ## Files this lane may touch
 ${lane.files || '(infer from the change; keep it minimal + file-disjoint from sibling lanes)'}
 
-Recon the area-of-change in the repo, then plan: the EXACT files to create/edit, the approach, and — for EACH change — the OBSERVABLE OUTCOME a caller/test can see (return values, exact output, error messages; this feeds the next BEHAVIORAL phase directly). Do NOT propose a heavyweight sealed verify-script.
+## Phase 0 recon — what a fresh agent found ACTUALLY EXISTS (#58)
+${reconBlock(recon)}
+
+Build the plan ON that inventory: it is evidence, gathered before any approach was chosen. Where it says something already exists, CONSUME it — do not rebuild it. Where it flags an open question, RESOLVE it. Where it contradicts the lane brief's file list, prefer the recon and say so. If you must contradict the recon, verify against the real code first and state why.
+
+Plan: the EXACT files to create/edit, the approach, and — for EACH change — the OBSERVABLE OUTCOME a caller/test can see (return values, exact output, error messages; this feeds the next BEHAVIORAL phase directly). Do NOT propose a heavyweight sealed verify-script.
 
 Return the StructuredOutput: { plan: <the full plan>, files: [...], validation: <how this will be validated>, observable_outcomes: <for each change, what a caller/test can OBSERVE> }.`
 }
 
-function standardSpecRevisePrompt(lane, prevPlan, verdict) {
+function standardSpecRevisePrompt(lane, prevPlan, verdict, recon) {
   return `You are the SPEC agent REVISING the plan for standard-wave lane "${lane.id}" (issue #${lane.issue}). An independent fable adversary found problems with the plan and/or the behavioral contracts derived from it. Apply the VERBATIM fixes; keep everything else stable. READ-ONLY.
 
 ## The change
 ${lane.implement}
+
+## Phase 0 recon — the same inventory the original plan was built on (#58)
+${reconBlock(recon)}
+
+Fix what was found without drifting off the recon: a revision that "solves" a finding by contradicting verified evidence has traded one defect for a worse one.
 
 ## Previous plan
 ${prevPlan}
@@ -631,11 +743,14 @@ ${spec.plan}
 Return the StructuredOutput: { contracts: <numbered "When X, the system Y" contracts>, contract_count: <the count> }.`
 }
 
-function standardSpecAdversaryPrompt(lane, spec, behavioral) {
+function standardSpecAdversaryPrompt(lane, spec, behavioral, recon) {
   return `You are the SPEC ADVERSARY (Fable 5) for standard-wave lane "${lane.id}" (issue #${lane.issue}) on ${repo}. Independently pressure-test BOTH the plan and the behavioral contracts for this NEW, sealable-behavior module. READ-ONLY; verify against the REAL code.
 
 ## The change
 ${lane.implement}
+
+## Phase 0 recon — the evidence the plan was built on (#58)
+${reconBlock(recon)}
 
 ## Proposed plan
 ${spec.plan}
@@ -644,6 +759,7 @@ ${spec.plan}
 ${behavioral.contracts}
 
 ## Decisive checks
+0. PLAN vs EVIDENCE — does the plan CONTRADICT the recon: asserting something exists that the recon found absent, rebuilding something it found already present, or ignoring an open question it raised? You are the only phase holding both documents. Treat the recon as evidence, not gospel: if you believe IT is wrong, verify against the real code and say so explicitly.
 1. SPECIFICITY — is every contract concrete (exact values/strings/errors), not vague?
 2. TRIVIAL-SATISFACTION — could a stub/no-op implementation pass any contract?
 3. EDGE-CASE COVERAGE — happy path, error paths, edge cases, interactions all present?
@@ -804,7 +920,7 @@ implement: suite = ${impl.suite || '(none)'} · files = ${(impl.files || []).joi
 Return the StructuredOutput: verdict, blockers (file:line + why), majors, notes. REQUEST_CHANGES on any hash mismatch, missing/mismatched SEAL commit, tautological test, test-convenience shortcut, or scope breach.`
 }
 
-log(`orchemist-wave [${mode}]: ${lanes.length} lane(s) off ${repo}@${base} — ${mode === 'maintenance' ? 'spec → fable adversary → implement → fable review' : mode === 'codemod' ? 'spec → fable adversary → codemod-implement → fable review' : mode === 'content' ? 'research → draft (opus, worktree) → fact_check (fable gate) → red_team (fable gate)' : mode === 'standard' ? 'spec → behavioral → spec_adversary → acceptance_test → pre-flight RED → test_adversary → SEAL → implement → acceptance_run → review' : 'implement (opus, worktree) → fable review'}, per-lane lockstep. Merge stays an operator step.`)
+log(`orchemist-wave [${mode}]: ${lanes.length} lane(s) off ${repo}@${base} — ${mode === 'maintenance' ? 'recon → spec → fable adversary → implement → fable review' : mode === 'codemod' ? 'recon → spec → fable adversary → codemod-implement → fable review' : mode === 'content' ? 'research → draft (opus, worktree) → fact_check (fable gate) → red_team (fable gate)' : mode === 'standard' ? 'recon → spec → behavioral → spec_adversary → acceptance_test → pre-flight RED → test_adversary → SEAL → implement → acceptance_run → review' : 'implement (opus, worktree) → fable review'}, per-lane lockstep. Merge stays an operator step.`)
 
 // Shared: turn a (lane, impl) into a reviewed result, or a blocked record.
 function blockedRecord(lane, impl, reason) {
@@ -843,25 +959,26 @@ if (mode === 'maintenance') {
   results = await pipeline(
     lanes,
     async (lane) => {
-      let spec = await agent(specPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+      const recon = await agent(reconPrompt(lane), { label: `recon:${lane.id}`, phase: 'Recon', agentType: 'general-purpose', schema: RECON_SCHEMA, ...tierFor('interpretive') })
+      let spec = await agent(specPrompt(lane, recon), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
       if (!spec) return { lane, spec: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+        const v = await agent(specAdversaryPrompt(lane, spec, recon), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds on the spec plan alone — the unresolved findings are NOT forwarded.`); break }
-        const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+        const revised = await agent(specRevisePrompt(lane, spec.plan, v, recon), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
         if (revised) spec = revised
       }
       return { lane, spec }
     },
     async ({ lane, spec }) => {
       if (!spec) return { lane, impl: null }
-      const impl = await agent(maintImplementPrompt(lane, spec), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...effortFor('implement') })
+      const impl = await agent(maintImplementPrompt(lane, spec), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...tierFor('implement') })
       return { lane, impl }
     },
     async ({ lane, impl }) => {
       if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'implement did not reach pushed state' : 'spec or implement returned null')
-      const v = await agent(maintReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+      const v = await agent(maintReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
       return reviewedRecord(lane, impl, v)
     },
   )
@@ -870,25 +987,26 @@ if (mode === 'maintenance') {
   results = await pipeline(
     lanes,
     async (lane) => {
-      let spec = await agent(specPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+      const recon = await agent(reconPrompt(lane), { label: `recon:${lane.id}`, phase: 'Recon', agentType: 'general-purpose', schema: RECON_SCHEMA, ...tierFor('interpretive') })
+      let spec = await agent(specPrompt(lane, recon), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
       if (!spec) return { lane, spec: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(specAdversaryPrompt(lane, spec), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+        const v = await agent(specAdversaryPrompt(lane, spec, recon), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — implement proceeds on the spec plan alone — the unresolved findings are NOT forwarded.`); break }
-        const revised = await agent(specRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+        const revised = await agent(specRevisePrompt(lane, spec.plan, v, recon), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
         if (revised) spec = revised
       }
       return { lane, spec }
     },
     async ({ lane, spec }) => {
       if (!spec) return { lane, impl: null }
-      const impl = await agent(codemodImplementPrompt(lane, spec), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...effortFor('implement') })
+      const impl = await agent(codemodImplementPrompt(lane, spec), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...tierFor('implement') })
       return { lane, impl }
     },
     async ({ lane, impl }) => {
       if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'implement did not reach pushed state' : 'spec or implement returned null')
-      const v = await agent(codemodReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+      const v = await agent(codemodReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
       return reviewedRecord(lane, impl, v)
     },
   )
@@ -899,33 +1017,33 @@ if (mode === 'maintenance') {
   results = await pipeline(
     lanes,
     async (lane) => {
-      const research = await agent(contentResearchPrompt(lane), { label: `research:${lane.id}`, phase: 'Research', agentType: 'general-purpose', model: 'sonnet', schema: RESEARCH_SCHEMA, ...effortFor('interpretive') })
+      const research = await agent(contentResearchPrompt(lane), { label: `research:${lane.id}`, phase: 'Research', agentType: 'general-purpose', model: 'sonnet', schema: RESEARCH_SCHEMA, ...tierFor('interpretive') })
       return { lane, research: research || { notes: '(research returned null — draft proceeds from source_material alone)', verified_videos: [], corrections: '' } }
     },
     async ({ lane, research }) => {
-      const impl = await agent(contentDraftPrompt(lane, research), { label: `draft:${lane.id}`, phase: 'Draft', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: CONTENT_IMPL_SCHEMA, ...effortFor('implement') })
+      const impl = await agent(contentDraftPrompt(lane, research), { label: `draft:${lane.id}`, phase: 'Draft', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: CONTENT_IMPL_SCHEMA, ...tierFor('implement') })
       return { lane, impl }
     },
     async ({ lane, impl }) => {
       if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'draft did not reach pushed state' : 'research or draft returned null')
       let cur = impl
       // ── fact_check gate (one bounded re-draft) ──
-      let fc = await agent(contentFactCheckPrompt(lane, cur), { label: `fact-check:${lane.id}`, phase: 'Fact-check', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+      let fc = await agent(contentFactCheckPrompt(lane, cur), { label: `fact-check:${lane.id}`, phase: 'Fact-check', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
       if (fc && fc.verdict === 'REQUEST_CHANGES') {
-        const rd = await agent(contentRedraftPrompt(lane, cur, fc, 'fact-check'), { label: `redraft-fc:${lane.id}`, phase: 'Draft', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: CONTENT_IMPL_SCHEMA, ...effortFor('implement') })
+        const rd = await agent(contentRedraftPrompt(lane, cur, fc, 'fact-check'), { label: `redraft-fc:${lane.id}`, phase: 'Draft', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: CONTENT_IMPL_SCHEMA, ...tierFor('implement') })
         if (rd && rd.status === 'pushed') {
           cur = rd
-          fc = await agent(contentFactCheckPrompt(lane, cur), { label: `fact-check2:${lane.id}`, phase: 'Fact-check', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+          fc = await agent(contentFactCheckPrompt(lane, cur), { label: `fact-check2:${lane.id}`, phase: 'Fact-check', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         }
       }
       if (!fc || fc.verdict !== 'APPROVE') return contentBlocked(lane, cur, 'fact_check', fc)
       // ── red_team gate (one bounded re-draft) ──
-      let rt = await agent(contentRedTeamPrompt(lane, cur), { label: `red-team:${lane.id}`, phase: 'Red-team', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+      let rt = await agent(contentRedTeamPrompt(lane, cur), { label: `red-team:${lane.id}`, phase: 'Red-team', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
       if (rt && rt.verdict === 'REQUEST_CHANGES') {
-        const rd = await agent(contentRedraftPrompt(lane, cur, rt, 'red-team'), { label: `redraft-rt:${lane.id}`, phase: 'Draft', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: CONTENT_IMPL_SCHEMA, ...effortFor('implement') })
+        const rd = await agent(contentRedraftPrompt(lane, cur, rt, 'red-team'), { label: `redraft-rt:${lane.id}`, phase: 'Draft', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: CONTENT_IMPL_SCHEMA, ...tierFor('implement') })
         if (rd && rd.status === 'pushed') {
           cur = rd
-          rt = await agent(contentRedTeamPrompt(lane, cur), { label: `red-team2:${lane.id}`, phase: 'Red-team', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+          rt = await agent(contentRedTeamPrompt(lane, cur), { label: `red-team2:${lane.id}`, phase: 'Red-team', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         }
       }
       if (!rt || rt.verdict !== 'APPROVE') return contentBlocked(lane, cur, 'red_team', rt)
@@ -940,17 +1058,18 @@ if (mode === 'maintenance') {
     lanes,
     // Stage 1 — spec → behavioral → spec_adversary
     async (lane) => {
-      let spec = await agent(standardSpecPrompt(lane), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+      const recon = await agent(reconPrompt(lane), { label: `recon:${lane.id}`, phase: 'Recon', agentType: 'general-purpose', schema: RECON_SCHEMA, ...tierFor('interpretive') })
+      let spec = await agent(standardSpecPrompt(lane, recon), { label: `spec:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
       if (!spec) return { lane, spec: null, behavioral: null }
-      let behavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...effortFor('interpretive') })
+      let behavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...tierFor('interpretive') })
       if (!behavioral) return { lane, spec, behavioral: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(standardSpecAdversaryPrompt(lane, spec, behavioral), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+        const v = await agent(standardSpecAdversaryPrompt(lane, spec, behavioral, recon), { label: `spec-adv:${lane.id}`, phase: 'Spec', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: spec-adversary still REQUEST_CHANGES after 1 revise — acceptance_test proceeds on the behavioral contracts alone — the unresolved findings are NOT forwarded.`); break }
-        const revisedSpec = await agent(standardSpecRevisePrompt(lane, spec.plan, v), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...effortFor('interpretive') })
+        const revisedSpec = await agent(standardSpecRevisePrompt(lane, spec.plan, v, recon), { label: `spec-rev:${lane.id}`, phase: 'Spec', agentType: 'general-purpose', schema: SPEC_SCHEMA, ...tierFor('interpretive') })
         if (revisedSpec) spec = revisedSpec
-        const revisedBehavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral-rev:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...effortFor('interpretive') })
+        const revisedBehavioral = await agent(standardBehavioralPrompt(lane, spec), { label: `behavioral-rev:${lane.id}`, phase: 'Behavioral', agentType: 'general-purpose', schema: BEHAVIORAL_SCHEMA, ...tierFor('interpretive') })
         if (revisedBehavioral) behavioral = revisedBehavioral
       }
       return { lane, spec, behavioral }
@@ -958,17 +1077,17 @@ if (mode === 'maintenance') {
     // Stage 2 — acceptance_test → pre-flight RED → test_adversary
     async ({ lane, spec, behavioral }) => {
       if (!spec || !behavioral) return { lane, seal: null }
-      let test = await agent(standardAcceptanceTestPrompt(lane, spec, behavioral), { label: `acc-test:${lane.id}`, phase: 'Acceptance Test', agentType: 'orchemist-tester', schema: SEALED_TEST_SCHEMA, ...effortFor('interpretive') })
+      let test = await agent(standardAcceptanceTestPrompt(lane, spec, behavioral), { label: `acc-test:${lane.id}`, phase: 'Acceptance Test', agentType: 'orchemist-tester', schema: SEALED_TEST_SCHEMA, ...tierFor('interpretive') })
       if (!test) return { lane, seal: null }
-      let pf = await agent(standardPreflightPrompt(lane, test), { label: `preflight:${lane.id}`, phase: 'Acceptance Test', agentType: 'general-purpose', isolation: 'worktree', schema: PREFLIGHT_SCHEMA, ...effortFor('implement') })
+      let pf = await agent(standardPreflightPrompt(lane, test), { label: `preflight:${lane.id}`, phase: 'Acceptance Test', agentType: 'general-purpose', isolation: 'worktree', schema: PREFLIGHT_SCHEMA, ...tierFor('implement') })
       if (!pf) return { lane, seal: null }
       for (let round = 0; round < 2; round++) {
-        const v = await agent(standardTestAdversaryPrompt(lane, test, pf), { label: `test-adv:${lane.id}`, phase: 'Test Adversary', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+        const v = await agent(standardTestAdversaryPrompt(lane, test, pf), { label: `test-adv:${lane.id}`, phase: 'Test Adversary', agentType: 'orchemist-adversary', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
         if (!v || v.verdict === 'APPROVE') break
         if (round === 1) { log(`lane ${lane.id}: test-adversary still REQUEST_CHANGES after 1 revise — SEAL proceeds on the sealed test as it stands — the unresolved findings are NOT forwarded.`); break }
-        test = await agent(standardAcceptanceTestRevisePrompt(lane, test, v), { label: `acc-test-rev:${lane.id}`, phase: 'Acceptance Test', agentType: 'orchemist-tester', schema: SEALED_TEST_SCHEMA, ...effortFor('interpretive') })
+        test = await agent(standardAcceptanceTestRevisePrompt(lane, test, v), { label: `acc-test-rev:${lane.id}`, phase: 'Acceptance Test', agentType: 'orchemist-tester', schema: SEALED_TEST_SCHEMA, ...tierFor('interpretive') })
         if (!test) return { lane, seal: null }
-        pf = await agent(standardPreflightPrompt(lane, test), { label: `preflight2:${lane.id}`, phase: 'Acceptance Test', agentType: 'general-purpose', isolation: 'worktree', schema: PREFLIGHT_SCHEMA, ...effortFor('implement') })
+        pf = await agent(standardPreflightPrompt(lane, test), { label: `preflight2:${lane.id}`, phase: 'Acceptance Test', agentType: 'general-purpose', isolation: 'worktree', schema: PREFLIGHT_SCHEMA, ...tierFor('implement') })
         if (!pf) return { lane, seal: null }
       }
       return { lane, test, pf }
@@ -976,19 +1095,19 @@ if (mode === 'maintenance') {
     // Stage 3 — SEAL
     async ({ lane, test, pf }) => {
       if (!pf) return { lane, seal: null }
-      const seal = await agent(standardSealPrompt(lane, test, pf), { label: `seal:${lane.id}`, phase: 'Seal', agentType: 'general-purpose', isolation: 'worktree', schema: SEAL_SCHEMA, ...effortFor('implement') })
+      const seal = await agent(standardSealPrompt(lane, test, pf), { label: `seal:${lane.id}`, phase: 'Seal', agentType: 'general-purpose', isolation: 'worktree', schema: SEAL_SCHEMA, ...tierFor('implement') })
       return { lane, seal }
     },
     // Stage 4 — implement
     async ({ lane, seal }) => {
       if (!seal || seal.status !== 'sealed') return { lane, impl: null, seal }
-      const impl = await agent(standardImplementPrompt(lane, seal), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...effortFor('implement') })
+      const impl = await agent(standardImplementPrompt(lane, seal), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...tierFor('implement') })
       return { lane, impl, seal }
     },
     // Stage 5 — acceptance_run
     async ({ lane, impl, seal }) => {
       if (!impl || impl.status !== 'pushed') return { lane, impl, seal, run: null }
-      const run = await agent(standardAcceptanceRunPrompt(lane, impl, seal), { label: `acc-run:${lane.id}`, phase: 'Acceptance Run', agentType: 'general-purpose', isolation: 'worktree', schema: ACCEPTANCE_RUN_SCHEMA, ...effortFor('implement') })
+      const run = await agent(standardAcceptanceRunPrompt(lane, impl, seal), { label: `acc-run:${lane.id}`, phase: 'Acceptance Run', agentType: 'general-purpose', isolation: 'worktree', schema: ACCEPTANCE_RUN_SCHEMA, ...tierFor('implement') })
       return { lane, impl, seal, run }
     },
     // Stage 6 — review (blocked records are built HERE, the final stage, so lane/issue/branch
@@ -1001,7 +1120,7 @@ if (mode === 'maintenance') {
         return blockedRecord(lane, impl, reason)
       }
       if (!run || !run.seal_intact || run.failed > 0) return blockedRecord(lane, impl, run ? `acceptance_run: seal_intact=${run.seal_intact} failed=${run.failed}` : 'acceptance_run returned null')
-      const v = await agent(standardReviewPrompt(lane, impl, run), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') })
+      const v = await agent(standardReviewPrompt(lane, impl, run), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') })
       return reviewedRecord(lane, impl, v)
     },
   )
@@ -1009,10 +1128,10 @@ if (mode === 'maintenance') {
   // Refactor mode (the original EPIC #942 flow): implement → review, no barrier.
   results = await pipeline(
     lanes,
-    (lane) => agent(refactorImplementPrompt(lane), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...effortFor('implement') }).then((impl) => ({ lane, impl })),
+    (lane) => agent(refactorImplementPrompt(lane), { label: `impl:${lane.id}`, phase: 'Implement', agentType: 'orchemist-implementer', model: 'opus', isolation: 'worktree', schema: IMPL_SCHEMA, ...tierFor('implement') }).then((impl) => ({ lane, impl })),
     ({ lane, impl }) => {
       if (!impl || impl.status !== 'pushed') return blockedRecord(lane, impl, impl ? impl.notes || 'implement did not reach pushed state' : 'implementer returned null')
-      return agent(refactorReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...effortFor('gate') }).then((v) => reviewedRecord(lane, impl, v))
+      return agent(refactorReviewPrompt(lane, impl), { label: `review:${lane.id}`, phase: 'Review', agentType: 'general-purpose', model: 'fable', schema: VERDICT_SCHEMA, ...tierFor('gate') }).then((v) => reviewedRecord(lane, impl, v))
     },
   )
 }
